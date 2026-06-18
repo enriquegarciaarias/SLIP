@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+Process.txt
+ProcessLog.txt
+
+models/
+results/
+
+# Entornos virtuales
+.venv/
+cyberbullying_env/
+
+# IDEs
+.idea/
+.vscode/
+
+# Configuración local
+config.json

@@ -1,0 +1,2 @@
+class ProcessEnd(Exception):
+    pass
