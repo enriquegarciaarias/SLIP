@@ -1,6 +1,7 @@
 # enrichmentEngine.py
 from sources.common.common import logger, processControl, writeLog
 from sources.pdf_resolver import resolve_pdf_url
+from sources.common.utils import inicioModulo
 
 import json
 import time
@@ -344,15 +345,8 @@ def save_selected(selected: list, output_dir: Path) -> Path:
 # --------------------------------------------------
 # ENTRY POINT
 # --------------------------------------------------
-
 def processEnrichmentEngine():
-    writeLog("info", logger, "🚀 [START] Processing processEnrichmentEngine")
-
-    base_input_dir = Path(processControl.env.get("input", ""))
-    base_output_dir = Path(processControl.env.get("output", ""))
-    subject = processControl.args.subject
-
-    output_dir = base_output_dir / subject
+    input_dir, output_dir = inicioModulo("processEnrichmentEngine")
     ranked_file = output_dir / "ranked_papers.json"
 
     if not ranked_file.exists():

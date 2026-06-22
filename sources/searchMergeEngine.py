@@ -18,7 +18,7 @@ en lugar de regenerarlos con build_paper_id().
 """
 
 from sources.common.common import logger, processControl, writeLog
-from sources.common.utils import normalized_title, sha1
+from sources.common.utils import normalized_title, sha1, inicioModulo
 
 from collections import defaultdict
 from pathlib import Path
@@ -157,16 +157,7 @@ def processSearchMergeEngine():
     """
     Fusiona todas las fuentes definidas en processControl.defaults.get("search")["availables"]
     """
-    writeLog("info", logger, "🚀 [START] Processing processSearchMergeEngine")
-
-    base_input_dir = Path(processControl.env.get("input", ""))
-    base_output_dir = Path(processControl.env.get("output", ""))
-    subject = processControl.args.subject
-
-    output_dir = base_output_dir / subject
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    writeLog("info", logger, f"[MERGE] Search dir: {output_dir}")
+    input_dir, output_dir = inicioModulo("processSearchMergeEngine")
 
     search_config = processControl.defaults.get("search", {})
     availables = search_config.get("availables", [])

@@ -1,5 +1,6 @@
 # discoveryEngine.py
 from sources.common.common import logger, processControl, writeLog
+from sources.common.utils import inicioModulo
 
 import json
 from pathlib import Path
@@ -24,12 +25,15 @@ from sklearn.cluster import KMeans
 try:
     import spacy
     nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
+    # 🔥 FIX: Aumentar el límite de caracteres para evitar errores con textos largos
+    nlp.max_length = 2_000_000  # 2 millones de caracteres
 except OSError:
     import subprocess
     writeLog("info", logger, "[Discovery] spaCy model not found. Downloading en_core_web_sm...")
     subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
     import spacy
     nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
+    nlp.max_length = 2_000_000
 except ImportError:
     writeLog("error", logger, "[Discovery] spaCy not installed. Please `pip install spacy` and download model.")
     raise
@@ -53,6 +57,9 @@ RELEVANT_SECTIONS = ["abstract", "introduction", "methodology", "results", "conc
 # UMAP / HDBSCAN
 UMAP_COMPONENTS = 8
 MIN_CLUSTER_SIZE = 3
+
+# 🔥 Nuevo: límite máximo de caracteres para el tokenizador de spaCy
+MAX_TEXT_LENGTH = 500_000  # 500k caracteres (suficiente para la mayoría de papers)
 
 # Extra stopwords (including numbers, months, academic boilerplate)
 EXTRA_STOPWORDS = {
@@ -90,6 +97,9 @@ class POSFilterVectorizer(CountVectorizer):
 
     def build_tokenizer(self):
         def tokenize(text):
+            # 🔥 FIX: truncar texto si excede el límite para evitar error en spaCy
+            if len(text) > MAX_TEXT_LENGTH:
+                text = text[:MAX_TEXT_LENGTH]
             doc = self.nlp_model(text)
             tokens = []
             for token in doc:
@@ -125,7 +135,6 @@ def load_study_context(input_dir: Path) -> tuple[str, dict, list[str]]:
     Devuelve (study_text, concepts_query, focus_terms).
     """
     json_file = input_dir / "studyDescription.json"
-    desc_file = input_dir / "studyDescription.txt"   # compatibilidad con versión anterior
 
     study_text = ""
     focus_terms = []
@@ -145,26 +154,6 @@ def load_study_context(input_dir: Path) -> tuple[str, dict, list[str]]:
             writeLog("info", logger, f"[Discovery] Loaded studyDescription.json: {len(objectives)} objectives, {len(focus_terms)} focus terms")
         except Exception as e:
             writeLog("error", logger, f"[Discovery] Error reading studyDescription.json: {e}")
-
-    # Si no hay JSON, intentar TXT (legacy)
-    elif desc_file.exists():
-        content = desc_file.read_text(encoding="utf-8").strip()
-        study_text = content
-        # Extraer Keywords: y FocusTerms: de forma rudimentaria (para compatibilidad)
-        kw_match = re.search(r'^Keywords:\s*(.+?)(?=\n\s*\n|\Z)', content, re.MULTILINE | re.DOTALL)
-        if kw_match:
-            raw = kw_match.group(1)
-            # No hacemos nada con keywords ahora, pero podríamos
-            pass
-        focus_match = re.search(r'^FocusTerms:\s*(.+?)(?=\n\s*\n|\Z)', content, re.MULTILINE | re.DOTALL)
-        if focus_match:
-            raw = focus_match.group(1)
-            focus_terms = [
-                t.strip().lower()
-                for t in re.split(r'[·,;]', raw)
-                if t.strip() and len(t.strip()) > 2
-            ]
-        writeLog("info", logger, f"[Discovery] Loaded studyDescription.txt (legacy)")
 
     else:
         writeLog("info", logger,
@@ -277,10 +266,14 @@ def extract_study_seeds(
 
 
 # --------------------------------------------------
-# TEXT BUILDER with seed prepending
+# TEXT BUILDER with seed prepending and length limits
 # --------------------------------------------------
 
-def build_text(paper: dict, seed_terms: Optional[list[str]] = None) -> str:
+def build_text(paper: dict, seed_terms: Optional[list[str]] = None, max_section_chars: int = 8000) -> str:
+    """
+    Construye el texto de un documento para el pipeline, con límites por sección
+    para evitar que un solo documento sature el tokenizador.
+    """
     parts = []
     if seed_terms:
         parts.append(" ".join(seed_terms))
@@ -291,16 +284,16 @@ def build_text(paper: dict, seed_terms: Optional[list[str]] = None) -> str:
     ])
     clean_text = paper.get("clean_text", "")
     if clean_text and len(clean_text) > 500:
-        parts.append(clean_text[:8000])
+        parts.append(clean_text[:max_section_chars * 2])
     sections = paper.get("clean_sections", {})
     for sec in RELEVANT_SECTIONS:
         sec_text = sections.get(sec, "")
         if sec_text and len(sec_text) > 100:
-            parts.append(sec_text[:4000])
+            parts.append(sec_text[:max_section_chars])
     if len(" ".join(parts)) < 1000:
         full_text = paper.get("full_text", "")
         if full_text and len(full_text) > 500:
-            parts.append(full_text[:8000])
+            parts.append(full_text[:max_section_chars * 2])
     return " ".join(parts)
 
 
@@ -310,7 +303,8 @@ def build_text(paper: dict, seed_terms: Optional[list[str]] = None) -> str:
 
 def collect_candidate_sections(
     clean_corpus: list[dict],
-    seed_terms: list[str]
+    seed_terms: list[str],
+    max_section_chars: int = 8000
 ) -> List[Tuple[str, str, str]]:
     """
     Returns a list of (paper_id, section_name, section_text) for all sections
@@ -329,7 +323,9 @@ def collect_candidate_sections(
                 if seed_terms:
                     text_parts.append(" ".join(seed_terms))
                 text_parts.append(paper.get("title", ""))
-                text_parts.append(sec_text)
+                # Truncar la sección para evitar textos excesivamente largos
+                truncated_sec = sec_text[:max_section_chars]
+                text_parts.append(truncated_sec)
                 final_text = " ".join(text_parts)
                 candidates.append((paper_id, sec_name, final_text))
     return candidates
@@ -438,7 +434,7 @@ def concept_discovery_bertopic(
     seed_topic_list: list[list[str]],
     study_embedding: np.ndarray,
     focus_embedding: np.ndarray,
-    embedding_model: SentenceTransformer,   # 🔥 NUEVO: recibir modelo preinstanciado
+    embedding_model: SentenceTransformer,
     study_text:      str,
 ) -> dict:
 
@@ -604,7 +600,7 @@ def fallback_concept_discovery(
     seed_terms:      list[str],
     study_embedding: np.ndarray,
     focus_embedding: np.ndarray,
-    embedding_model: SentenceTransformer,   # 🔥 NUEVO
+    embedding_model: SentenceTransformer,
     study_text:      str,
 ) -> dict:
     # Build full-text documents (no chunking)
@@ -668,14 +664,7 @@ def fallback_concept_discovery(
 # --------------------------------------------------
 
 def processDiscoveryEngine():
-    writeLog("info", logger, "🚀 [START] processDiscoveryEngine (chunk-level, POS filtering, multi-topic papers)")
-
-    base_input_dir = Path(processControl.env.get("input", ""))
-    base_output_dir = Path(processControl.env.get("output", ""))
-    subject = processControl.args.subject
-
-    output_dir = base_output_dir / subject
-    input_dir = base_input_dir / subject
+    input_dir, output_dir = inicioModulo("processDiscoveryEngine")
     text_file = output_dir / "papers_text.json"
 
     if not text_file.exists():
@@ -726,7 +715,7 @@ def processDiscoveryEngine():
             seed_terms,
             study_embedding,
             focus_embedding,
-            embedding_model,   # 🔥 NUEVO
+            embedding_model,
             study_text
         )
     else:
@@ -738,7 +727,7 @@ def processDiscoveryEngine():
             seed_topic_list,
             study_embedding,
             focus_embedding,
-            embedding_model,   # 🔥 NUEVO
+            embedding_model,
             study_text
         )
 

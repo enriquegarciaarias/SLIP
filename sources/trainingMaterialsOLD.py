@@ -8,7 +8,6 @@ from datetime import datetime
 import re
 import requests
 import time
-import hashlib
 from functools import lru_cache
 
 # --------------------------------------------------
@@ -16,52 +15,33 @@ from functools import lru_cache
 # --------------------------------------------------
 OFF_TOPIC_THRESHOLD = 0.30
 MAX_CHARS_PER_EMERGING = 8000
-TRANSLATE_EVIDENCES = False
-MAX_EVIDENCES_TO_SHOW = 30
+TRANSLATE_EVIDENCES = False  # Las evidencias ya vienen traducidas de synthesize_findings
+MAX_EVIDENCES_TO_SHOW = 30   # Número máximo de evidencias a mostrar por bloque
 
-# CHANGED: was 2.5 — out of range for cosine similarity, which is
-# normalized to [0, 1] in practice across this pipeline (see
-# concept_evidence.json, clustered_evidences.json, aligned_concepts.json).
-# With 2.5, no real evidence ever passed the filter — every concept in
-# the final document showed "SIN EVIDENCIA SUFICIENTE" regardless of
-# upstream pipeline quality. 0.35 is consistent with OFF_TOPIC_THRESHOLD
-# and ALIGNMENT_SCORE_THRESHOLD used elsewhere in the pipeline.
-MIN_DISPLAY_SIMILARITY = 0.35
+# 🔥 NUEVO: Umbral mínimo de similitud para mostrar una evidencia en el informe
+# Las evidencias con similitud inferior a este valor NO se mostrarán.
+MIN_DISPLAY_SIMILARITY = 2.5   # Ajusta según necesidad (valores típicos entre 1.0 y 3.0)
 
-# CHANGED: was llama3.2:3b. This module produces the final document
-# the researcher reads directly — translation quality, emerging-topic
-# titles, and synthesized descriptions all benefit from a larger model.
-# qwen3:8b is already used elsewhere in the pipeline (synthesize_findings)
-# and fits the RTX 4060 in Q4.
+# Para traducción (solo si se necesita para emergentes o por si acaso)
 LLM_CONFIG = {
     "backend": "ollama",
-    "model": "qwen3:8b",
+    "model": "llama3.2:3b",
     "url": "http://localhost:11434/api/generate",
 }
-
-# Disk cache for translations — survives across pipeline re-runs.
-# CHANGED: was in-memory lru_cache only, which reset on every execution.
-# Research pipelines are iterated on heavily; re-translating identical
-# evidence text on every re-run wastes LLM calls and time.
-TRANSLATION_CACHE_FILE = "translation_cache.json"
-
 
 # --------------------------------------------------
 # FUNCIONES AUXILIARES
 # --------------------------------------------------
-
 def load_json(file_path: Path) -> dict:
     with open(file_path, "r", encoding="utf-8") as f:
         return json.load(f)
-
 
 def clean_text_for_markdown(text: str) -> str:
     if not text:
         return ""
     return re.sub(r'\s+', ' ', text).strip()
 
-
-def call_llm(prompt: str, max_retries: int = 2, num_predict: int = 1024) -> str:
+def call_llm(prompt: str, max_retries: int = 2) -> str:
     for attempt in range(max_retries):
         try:
             response = requests.post(
@@ -70,7 +50,7 @@ def call_llm(prompt: str, max_retries: int = 2, num_predict: int = 1024) -> str:
                     "model": LLM_CONFIG["model"],
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.2, "num_predict": num_predict},
+                    "options": {"temperature": 0.2, "num_predict": 1024},
                 },
                 timeout=90,
             )
@@ -85,109 +65,21 @@ def call_llm(prompt: str, max_retries: int = 2, num_predict: int = 1024) -> str:
         time.sleep(2)
     return ""
 
-
-def call_llm_json(prompt: str, max_retries: int = 2, num_predict: int = 2048) -> dict:
-    """
-    Variant of call_llm that expects a JSON object in the response and
-    parses it. Used by generate_emerging_title_and_description to combine
-    two previously separate LLM calls into one.
-
-    CHANGED: num_predict raised from the call_llm default (1024) to 2048.
-    A combined title+description response (200-300 word description in
-    Spanish, wrapped in JSON) was being truncated mid-object at 1024
-    tokens, producing invalid JSON that failed to parse — visible in
-    logs as "[LLM] Could not parse JSON response" even though the start
-    of the response looked well-formed.
-
-    Strips markdown code fences if the model wraps the JSON in ```json.
-    Returns {} on failure so callers can fall back gracefully.
-    """
-    raw = call_llm(prompt, max_retries, num_predict=num_predict)
-    if not raw:
-        return {}
-    cleaned = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        # NEW: attempt a salvage parse — if the JSON was cut off mid-string,
-        # try to close it and recover at least the title, which appears
-        # first in the requested schema and is usually complete even when
-        # the longer description field gets truncated.
-        title_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
-        desc_match = re.search(r'"description"\s*:\s*"((?:[^"\\]|\\.)*)', cleaned)
-        if title_match:
-            salvaged = {"title": title_match.group(1)}
-            if desc_match:
-                # description may be incomplete (truncated) — keep what we have
-                salvaged["description"] = desc_match.group(1)
-            writeLog("warning", logger,
-                     "[LLM] JSON truncated, salvaged partial title/description")
-            return salvaged
-        writeLog("warning", logger, f"[LLM] Could not parse JSON response: {raw[:200]}")
-        return {}
-
-
-# --------------------------------------------------
-# TRANSLATION CACHE (disk-backed)
-# --------------------------------------------------
-
-def _load_translation_cache(output_dir: Path) -> dict:
-    cache_file = output_dir / TRANSLATION_CACHE_FILE
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_translation_cache(output_dir: Path, cache: dict) -> None:
-    cache_file = output_dir / TRANSLATION_CACHE_FILE
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False)
-
-
-def _text_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-
-
-# Module-level cache, populated at entrypoint, persisted at the end.
-_translation_cache: dict = {}
-
-
+@lru_cache(maxsize=100)
 def translate_to_spanish(text: str) -> str:
-    """
-    CHANGED: now backed by a disk-persisted cache (_translation_cache,
-    loaded/saved around the pipeline run) in addition to avoiding
-    redundant work within a single run. Re-running the pipeline after
-    fixing an upstream issue no longer re-translates identical text.
-    """
     if not text or len(text.strip()) < 10:
         return text
-
     clean_text = re.sub(r'\s+', ' ', text).strip()
-    key = _text_hash(clean_text)
-
-    if key in _translation_cache:
-        return _translation_cache[key]
-
-    text_for_prompt = clean_text
-    if len(text_for_prompt) > 3000:
-        text_for_prompt = text_for_prompt[:3000] + "..."
-
+    if len(clean_text) > 3000:
+        clean_text = clean_text[:3000] + "..."
     prompt = f"""Traduce el siguiente texto académico del inglés al español. Mantén el tono formal, la terminología técnica y la puntuación. Devuelve solo la traducción.
 
 Texto original:
-{text_for_prompt}
+{clean_text}
 
 Traducción al español:"""
     translated = call_llm(prompt)
-    result = translated if translated else text
-
-    _translation_cache[key] = result
-    return result
-
+    return translated if translated else text
 
 def format_evidence_strength(avg_score: float, evidence_count: int) -> tuple[str, str]:
     if evidence_count >= 5 and avg_score >= 0.70:
@@ -201,23 +93,22 @@ def format_evidence_strength(avg_score: float, evidence_count: int) -> tuple[str
     else:
         return ("Sin evidencia", "⚪")
 
-
 # --------------------------------------------------
 # FORMATEO DE EVIDENCIAS (reutilizable)
 # --------------------------------------------------
-
 def format_evidence_blocks(evidences: list, limit: int = MAX_EVIDENCES_TO_SHOW) -> str:
-    """Genera bloques de markdown para una lista de evidencias.
-       Filtra las evidencias por MIN_DISPLAY_SIMILARITY (now in the
-       correct [0,1] cosine similarity range).
+    """Genera bloques de markdown para una lista de evidencias (con estructura incluida).
+       Filtra las evidencias por MIN_DISPLAY_SIMILARITY.
     """
     if not evidences:
         return "No hay evidencias disponibles."
 
+    # Filtrar por similitud mínima
     filtered = [ev for ev in evidences if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
     if not filtered:
         return f"No hay evidencias con similitud ≥ {MIN_DISPLAY_SIMILARITY}."
 
+    # Limitar
     evidences_to_show = filtered[:limit]
 
     blocks = []
@@ -235,17 +126,15 @@ def format_evidence_blocks(evidences: list, limit: int = MAX_EVIDENCES_TO_SHOW) 
             """
         blocks.append(f"""
 - **{ev['paper_title']}** (similitud: {ev['similarity']:.3f}) (ID: `{ev['doc_id']}`)
-*"{evidence_text}"*  
+*“{evidence_text}”*  
 
 {estructurado_md}
         """)
     return "\n".join(blocks)
 
-
 # --------------------------------------------------
 # EVALUACIÓN DE LA QUERY
 # --------------------------------------------------
-
 def evaluate_search_strategy(concepts_query: dict, aligned_concepts: dict, candidate_concepts: dict) -> tuple[
     str, list]:
     query_obj = concepts_query.get("query", "No disponible")
@@ -282,53 +171,38 @@ def evaluate_search_strategy(concepts_query: dict, aligned_concepts: dict, candi
     """
     return evaluation, emergent_ids
 
-
 # --------------------------------------------------
-# GENERACIÓN DE TARJETAS DE HALLAZGOS
+# GENERACIÓN DE TARJETAS DE HALLAZGOS (MÚLTIPLES HALLAZGOS)
 # --------------------------------------------------
-
-def generate_training_card(concept_data: dict, aligned_lookup: dict = None) -> str:
-    """
-    CHANGED: accepts aligned_lookup (concept_id -> aligned concept dict)
-    to surface concept_type and focus_density in the card header —
-    information already computed upstream (conceptAlignmentEngine,
-    clusterEvidences) but previously discarded before reaching the
-    final document.
-    """
+def generate_training_card(concept_data: dict) -> str:
     concept_id = concept_data["concept_id"]
     concept_query = concept_data["concept_query"]
     findings = concept_data.get("findings", [])
     n_findings = concept_data.get("n_findings", 0)
     all_evidences = concept_data.get("all_evidences", [])
+    all_papers = concept_data.get("all_papers", [])
 
+    # 🔥 Filtrar all_papers: solo aquellos que tienen al menos una evidencia que supere MIN_DISPLAY_SIMILARITY
+    # (para construir la cabecera de papers representados)
+    # Obtenemos los doc_id de todas las evidencias que pasan el filtro
     valid_evidences = [ev for ev in all_evidences if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
     valid_paper_ids = set(ev["doc_id"] for ev in valid_evidences)
+    # Si no hay hallazgos y all_evidences vacío, no hay papers válidos
     if not valid_paper_ids and n_findings > 0:
+        # Si hay hallazgos, intentar obtener los papers de sus top_quotes (ya filtradas)
         valid_paper_ids = set()
         for finding in findings:
             for quote in finding.get("top_quotes", []):
                 if quote.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY:
                     valid_paper_ids.add(quote["doc_id"])
+    # Si aún así no hay, usar all_papers (pero puede contener papers de baja similitud)
+    # En ese caso, se mostrarán pero con advertencia; es mejor no mostrar ninguno si no pasan el filtro.
     display_papers = list(valid_paper_ids) if valid_paper_ids else []
 
+    # Cabecera común
     header = f"""
 ## Concepto {concept_id}: {concept_query}
     """
-
-    # NEW: surface concept_type and focus_density from upstream modules
-    if aligned_lookup is not None:
-        ac = aligned_lookup.get(concept_id)
-        if ac:
-            meta_parts = []
-            concept_type = ac.get("concept_type")
-            if concept_type and concept_type != "default":
-                meta_parts.append(f"Tipo: `{concept_type}`")
-            focus_density = ac.get("focus_density")
-            if focus_density is not None:
-                meta_parts.append(f"Densidad de vocabulario de foco: {focus_density * 100:.0f}%")
-            if meta_parts:
-                header += f"\n*{' · '.join(meta_parts)}*\n"
-
     if display_papers:
         paper_list = ', '.join(display_papers[:15])
         if len(display_papers) > 15:
@@ -338,7 +212,9 @@ def generate_training_card(concept_data: dict, aligned_lookup: dict = None) -> s
 
 """
 
+    # Caso 1: Sin hallazgos, pero con evidencias sueltas (all_evidences)
     if n_findings == 0:
+        # Filtrar all_evidences para mostrar solo las que pasan el umbral
         filtered_all = [ev for ev in all_evidences if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
         if filtered_all:
             return f"""{header}
@@ -357,6 +233,7 @@ No se generaron hallazgos consolidados para este concepto, pero se encontraron f
 No se encontraron hallazgos ni evidencias con similitud suficiente para este concepto en el corpus actual.
             """
 
+    # Caso 2: Múltiples hallazgos
     card_parts = []
     for idx, finding_data in enumerate(findings, 1):
         finding_text_es = finding_data["finding"]
@@ -365,8 +242,11 @@ No se encontraron hallazgos ni evidencias con similitud suficiente para este con
         strength, emoji = format_evidence_strength(avg_score, evidence_count)
         top_quotes = finding_data.get("top_quotes", [])
 
+        # Filtrar top_quotes por similitud mínima
         filtered_top = [q for q in top_quotes if q.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
         if not filtered_top:
+            # Si no hay citas que pasen el filtro, omitimos este hallazgo (o mostramos un mensaje)
+            # Pero es mejor omitirlo directamente
             continue
 
         card_parts.append(f"""
@@ -388,29 +268,64 @@ Los hallazgos generados no tienen citas con similitud suficiente para ser mostra
 
     return header + "\n---\n".join(card_parts)
 
-
 # --------------------------------------------------
-# CONCEPTOS EMERGENTES — título + descripción combinados
+# GENERACIÓN DE TÍTULO PARA EMERGENTES
 # --------------------------------------------------
-
-def generate_emerging_title_and_description(concept: dict, papers_text: dict) -> tuple[str, str]:
+def generate_emerging_title(concept: dict, papers_text: dict) -> str:
     """
-    CHANGED: combines what were two separate LLM calls
-    (generate_emerging_title + generate_emerging_description) into a
-    single call requesting structured JSON output. Halves the number
-    of LLM round-trips for emerging-topic sections, each of which had
-    a 90s timeout and up to 2 retries — meaningful with several
-    emerging concepts per run.
-
-    Falls back to the topic's discovered label / a generic message if
-    the LLM call or JSON parsing fails.
+    Genera un título descriptivo (máximo 10 palabras) para un concepto emergente.
     """
     paper_ids = concept.get("document_indices", [])
-    fallback_title = concept.get("label", "Concepto emergente")
-
     if not paper_ids:
-        return fallback_title, "No hay papers asociados a este concepto."
+        return concept.get("label", "Concepto emergente")
 
+    # Extraer fragmentos de los papers para dar contexto al LLM
+    texts = []
+    for pid in paper_ids:
+        paper = papers_text.get(pid)
+        if not paper:
+            continue
+        parts = [
+            paper.get("title", ""),
+            paper.get("abstract", ""),
+        ]
+        full = " ".join(parts)
+        if len(full) > 1000:
+            full = full[:1000]
+        texts.append(full)
+
+    combined = "\n\n".join(texts)
+    if len(combined) > 3000:
+        combined = combined[:3000]
+    if not combined.strip():
+        return concept.get("label", "Concepto emergente")
+
+    prompt = f"""Eres un asistente de investigación. A continuación tienes fragmentos de artículos científicos que pertenecen a un tópico emergente.
+
+Genera un TÍTULO CONCISO Y DESCRIPTIVO (máximo 10 palabras) que capture la esencia del tema. Debe ser en español y sin asteriscos ni negritas.
+
+Fragmentos:
+{combined}
+
+Título:"""
+    response = call_llm(prompt)
+    if not response:
+        return concept.get("label", "Concepto emergente")
+    # Limpiar posibles asteriscos o negritas
+    title = re.sub(r'[*#]', '', response).strip()
+    # Si el título es demasiado largo, truncar
+    if len(title) > 100:
+        title = title[:100]
+    return title if title else concept.get("label", "Concepto emergente")
+
+# --------------------------------------------------
+# GENERACIÓN DE DESCRIPCIÓN PARA EMERGENTES (versión original detallada)
+# --------------------------------------------------
+def generate_emerging_description(concept: dict, papers_text: dict) -> str:
+    """Genera descripción en español usando el LLM (versión original detallada)."""
+    paper_ids = concept.get("document_indices", [])
+    if not paper_ids:
+        return "No hay papers asociados a este concepto."
     texts = []
     for pid in paper_ids:
         paper = papers_text.get(pid)
@@ -422,53 +337,31 @@ def generate_emerging_title_and_description(concept: dict, papers_text: dict) ->
             paper.get("clean_sections", {}).get("introduction", ""),
             paper.get("clean_sections", {}).get("conclusion", ""),
         ]
-        full = " ".join(p for p in parts if p)
+        full = " ".join(parts)
         if len(full) > 1500:
             full = full[:1500]
         texts.append(full)
-
     combined = "\n\n".join(texts)
     if len(combined) > MAX_CHARS_PER_EMERGING:
         combined = combined[:MAX_CHARS_PER_EMERGING]
-
     if not combined.strip():
-        return fallback_title, "No hay texto suficiente para analizar."
+        return "No hay texto suficiente para analizar."
 
-    prompt = f"""Eres un asistente de investigación. A continuación tienes fragmentos de artículos científicos que pertenecen a un tópico emergente descubierto automáticamente.
+    prompt = f"""Eres un asistente de investigación. Resume en ESPAÑOL, de forma clara y concisa, el siguiente conjunto de fragmentos de artículos científicos que pertenecen al tema **"{concept.get('label', 'Concepto emergente')}"**.
 
-Genera:
-1. Un TÍTULO CONCISO (máximo 10 palabras), en español, sin asteriscos ni negritas.
-2. Una DESCRIPCIÓN de 200-300 palabras en español, resumiendo ideas principales, métodos, resultados y aplicaciones relevantes, en texto continuo y comprensible.
+Extrae las ideas principales, métodos, resultados y aplicaciones relevantes. Genera un texto continuo y comprensible de unas 200-300 palabras.
 
 Fragmentos:
 {combined}
-
-Responde ÚNICAMENTE con un objeto JSON con esta forma exacta, sin texto adicional ni bloques de código:
-{{"title": "...", "description": "..."}}"""
-
-    result = call_llm_json(prompt)
-
-    title = result.get("title", "").strip()
-    description = result.get("description", "").strip()
-
-    title = re.sub(r'[*#]', '', title).strip()
-    if len(title) > 100:
-        title = title[:100]
-
-    if not title:
-        title = fallback_title
-    if not description:
-        description = "No se pudo generar una descripción automática."
-    else:
-        description = clean_text_for_markdown(description)
-
-    return title, description
-
+"""
+    response = call_llm(prompt)
+    if not response:
+        return "No se pudo generar una descripción automática."
+    return clean_text_for_markdown(response)
 
 # --------------------------------------------------
-# CONCEPTOS EMERGENTES
+# CONCEPTOS EMERGENTES (actualizado)
 # --------------------------------------------------
-
 def generate_emerging_section(emergent_ids: list, candidate_concepts: dict, papers_text: dict) -> str:
     if not emergent_ids:
         return "## Conceptos emergentes no alineados\n\nNo se detectaron conceptos emergentes fuera de los objetivos.\n"
@@ -482,8 +375,10 @@ def generate_emerging_section(emergent_ids: list, candidate_concepts: dict, pape
     section += "Los siguientes tópicos fueron descubiertos automáticamente en los documentos, pero no superaron el umbral de alineamiento. Pueden indicar áreas relacionadas que merecen atención o servir para afinar sus consultas.\n\n"
 
     for i, concept in enumerate(emergent_concepts, 1):
-        # CHANGED: single combined call instead of two separate ones
-        title, description = generate_emerging_title_and_description(concept, papers_text)
+        # 🔥 Generar título con la nueva función específica
+        title = generate_emerging_title(concept, papers_text)
+        # 🔥 Usar la función original para la descripción detallada
+        description = generate_emerging_description(concept, papers_text)
 
         keywords = ", ".join(concept.get("keywords", [])[:8])
         paper_ids = concept.get("document_indices", [])
@@ -502,11 +397,9 @@ def generate_emerging_section(emergent_ids: list, candidate_concepts: dict, pape
     """
     return section
 
-
 # --------------------------------------------------
-# ANEXO TÉCNICO
+# ANEXO TÉCNICO (usa technical_annex.json)
 # --------------------------------------------------
-
 def generate_technical_annex_markdown(concepts_with_tech: list) -> str:
     if not concepts_with_tech:
         return "## Anexo Técnico: Metodologías y Experimentación\n\nNo se encontraron datos técnicos para los conceptos alineados.\n"
@@ -576,11 +469,9 @@ def generate_technical_annex_markdown(concepts_with_tech: list) -> str:
 
     return "\n".join(sections)
 
-
 # --------------------------------------------------
 # DOCUMENTO FINAL
 # --------------------------------------------------
-
 def generate_training_document(
         findings_data: list,
         concepts_query: dict,
@@ -591,14 +482,6 @@ def generate_training_document(
 ) -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     search_eval, emergent_ids = evaluate_search_strategy(concepts_query, aligned_concepts, candidate_concepts)
-
-    # NEW: lookup for concept_type / focus_density, built once and
-    # passed to generate_training_card so this metadata reaches the
-    # final document instead of being discarded after alignment/clustering.
-    aligned_lookup = {
-        ac.get("concept_id"): ac
-        for ac in aligned_concepts.get("aligned_concepts", [])
-    }
 
     doc = f"""# Scientific Literature Intelligence Pipeline (SLIP)
 
@@ -612,15 +495,18 @@ def generate_training_document(
 
 ## Resumen de hallazgos por concepto objetivo
 """
+    # 🔥 NUEVO: Lista en texto plano (no tabla)
     for concept in findings_data:
         concept_id = concept["concept_id"]
         q_short = concept["concept_query"]
         n_f = concept.get("n_findings", 0)
+        status = "✅ Con hallazgos" if n_f > 0 else "Sin hallazgos"
+        # Obtener número de papers únicos (all_papers)
         papers_count = len(concept.get("all_papers", []))
+        # Obtener texto del primer hallazgo (si existe)
         findings_list = concept.get("findings", [])
         if findings_list:
-            first_finding_text = findings_list[0].get("finding", "")
-            first_finding = first_finding_text[:150] + "..." if len(first_finding_text) > 150 else first_finding_text
+            first_finding = findings_list[0].get("finding", "")[:150] + "..." if len(findings_list[0].get("finding", "")) > 150 else findings_list[0].get("finding", "")
         else:
             first_finding = "Sin hallazgos sintetizados"
         doc += f"""
@@ -632,7 +518,7 @@ def generate_training_document(
     doc += "\n---\n"
 
     for concept in findings_data:
-        doc += generate_training_card(concept, aligned_lookup)
+        doc += generate_training_card(concept)
         doc += "\n---\n"
 
     doc += generate_emerging_section(emergent_ids, candidate_concepts, papers_text)
@@ -641,12 +527,15 @@ def generate_training_document(
     doc += generate_technical_annex_markdown(concepts_with_tech)
     doc += "\n---\n"
 
+    # Bibliografía (de los papers representados en las evidencias que pasan el filtro)
     doc += "\n## Bibliografía completa de los hallazgos principales\n"
     all_papers = {}
     for concept in findings_data:
+        # Obtener todos los doc_id de evidencias que superan el filtro
         for ev in concept.get("all_evidences", []):
             if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY:
                 all_papers[ev["doc_id"]] = ev["paper_title"]
+        # También añadir los de top_quotes de los findings (que ya pasan el filtro)
         for finding in concept.get("findings", []):
             for quote in finding.get("top_quotes", []):
                 if quote.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY:
@@ -660,14 +549,10 @@ def generate_training_document(
     doc += "\n*Documento generado automáticamente por SLIP. Los títulos de los papers se mantienen en su idioma original; los fragmentos de evidencia y los resúmenes están traducidos al español.*\n"
     return doc
 
-
 # --------------------------------------------------
 # ENTRY POINT
 # --------------------------------------------------
-
 def processTrainingMaterials():
-    global _translation_cache
-
     input_dir, output_dir = inicioModulo("processTrainingMaterials")
 
     findings_file = output_dir / "concept_findings.json"
@@ -677,26 +562,24 @@ def processTrainingMaterials():
     technical_file = output_dir / "technical_annex.json"
     papers_file = output_dir / "papers_text.json"
 
+    # Cargar hallazgos (obligatorio)
     if not findings_file.exists():
         writeLog("error", logger, f"[Training] No se encuentra {findings_file}")
         return
     findings_data = load_json(findings_file)
 
+    # Cargar otros archivos (opcionales)
     candidate_concepts = load_json(candidate_file) if candidate_file.exists() else {"concepts": [], "n_topics": 0}
-    aligned_concepts = load_json(aligned_file) if aligned_file.exists() else {
-        "aligned_concepts": [], "alignment_threshold": OFF_TOPIC_THRESHOLD
-    }
+    aligned_concepts = load_json(aligned_file) if aligned_file.exists() else {"aligned_concepts": [],
+                                                                              "alignment_threshold": OFF_TOPIC_THRESHOLD}
     concepts_query = load_json(query_file) if query_file.exists() else {"query": "", "concepts": []}
     concepts_with_tech = load_json(technical_file).get("concepts", []) if technical_file.exists() else []
 
+    # Cargar papers_text (necesario para emergentes)
     papers_text = {}
     if candidate_concepts.get("concepts") and papers_file.exists():
         papers_data = load_json(papers_file)
         papers_text = {p["paper_id"]: p for p in papers_data if "paper_id" in p}
-
-    # NEW: load disk-persisted translation cache before generating the doc
-    _translation_cache = _load_translation_cache(output_dir)
-    writeLog("info", logger, f"[Training] Loaded {len(_translation_cache)} cached translations")
 
     doc = generate_training_document(
         findings_data,
@@ -710,12 +593,8 @@ def processTrainingMaterials():
     output_file = output_dir / "training_materials.md"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(doc)
-
-    # NEW: persist translation cache for future runs
-    _save_translation_cache(output_dir, _translation_cache)
-    writeLog("info", logger, f"[Training] Saved {len(_translation_cache)} translations to cache")
-
     writeLog("info", logger, f"[Training] Material guardado en {output_file}")
+    print(f"\n📄 Documento completo (en español): {output_file}")
 
 
 if __name__ == "__main__":

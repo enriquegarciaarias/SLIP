@@ -19,6 +19,8 @@ LLM_CONFIG = {
 MAX_SECTION_CHARS = 3000
 REQUEST_TIMEOUT = 90
 SLEEP_BETWEEN_CALLS = 1  # segundos
+# 🔥 Aumentamos el número de tokens para que el LLM pueda completar el JSON
+LLM_NUM_PREDICT = 4096  # Antes 2048
 
 
 # --------------------------------------------------
@@ -41,6 +43,47 @@ def load_study_config(input_dir: Path) -> dict:
     return data.get("project", {})
 
 
+def clean_and_fix_json(response: str) -> str:
+    """
+    Intenta limpiar y reparar un JSON truncado o mal formado.
+    - Elimina texto antes de la primera llave.
+    - Elimina texto después de la última llave.
+    - Añade llaves de cierre si faltan.
+    """
+    # Buscar el primer '{'
+    start = response.find('{')
+    if start == -1:
+        return response
+    # Buscar el último '}' (podría estar truncado, así que buscamos el último que parezca completo)
+    # Buscar la última llave de cierre que tenga una estructura razonable (que no esté dentro de una cadena)
+    # Simplificamos: buscar el último '}' que no esté seguido de una coma o dentro de una cadena.
+    # Usamos una búsqueda simple desde el final.
+    end = response.rfind('}')
+    if end == -1:
+        # No hay llave de cierre, intentamos añadirla
+        # Tomamos desde start hasta el final y añadimos '}'
+        # Pero necesitamos asegurarnos de que no haya contenido extra después de start
+        # Lo más seguro es truncar en la última coma antes de un cierre esperado.
+        # Simple: tomamos completo desde start y añadimos '}'
+        fixed = response[start:] + '}'
+        return fixed
+    else:
+        # Tomamos desde start hasta end+1
+        fixed = response[start:end+1]
+        # Verificar si el JSON está completo
+        try:
+            json.loads(fixed)
+            return fixed
+        except json.JSONDecodeError:
+            # Si no es válido, intentar añadir llaves de cierre faltantes
+            # Contar llaves abiertas y cerradas
+            open_braces = fixed.count('{')
+            close_braces = fixed.count('}')
+            if open_braces > close_braces:
+                fixed += '}' * (open_braces - close_braces)
+            return fixed
+
+
 def call_llm(prompt: str, max_retries: int = 2) -> str:
     """Llama al LLM con reintentos y extrae JSON si está envuelto en markdown."""
     for attempt in range(max_retries):
@@ -51,7 +94,10 @@ def call_llm(prompt: str, max_retries: int = 2) -> str:
                     "model": LLM_CONFIG["model"],
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 2048},
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": LLM_NUM_PREDICT,  # 🔥 Aumentado
+                    },
                 },
                 timeout=REQUEST_TIMEOUT,
             )
@@ -61,12 +107,18 @@ def call_llm(prompt: str, max_retries: int = 2) -> str:
                     # Intentar extraer JSON del bloque de código markdown
                     json_match = re.search(r'```json\s*(\{.*?\})\s*```', result, re.DOTALL)
                     if json_match:
-                        return json_match.group(1).strip()
+                        candidate = json_match.group(1).strip()
+                        # Intentar reparar
+                        candidate = clean_and_fix_json(candidate)
+                        return candidate
                     # Si no, intentar encontrar cualquier objeto JSON
                     json_match = re.search(r'\{.*?\}', result, re.DOTALL)
                     if json_match:
-                        return json_match.group(0).strip()
-                    return result
+                        candidate = json_match.group(0).strip()
+                        candidate = clean_and_fix_json(candidate)
+                        return candidate
+                    # Si no hay JSON, devolver la respuesta limpia
+                    return clean_and_fix_json(result)
                 else:
                     writeLog("warning", logger, f"LLM returned empty response (attempt {attempt + 1})")
             else:
@@ -105,8 +157,13 @@ Extract the following fields from the provided text and return ONLY a valid JSON
 **Required JSON structure:**
 {json_schema}
 
-If a field is missing or cannot be inferred, use null or an empty list [].
-Only output the JSON object."""
+Instructions:
+- If a field is missing or cannot be inferred, use null for strings or [] for lists.
+- Ensure the JSON is complete with all closing braces and brackets.
+- Do not include any text outside the JSON object.
+- Output the JSON object only.
+
+JSON:"""
     return prompt
 
 
@@ -137,6 +194,7 @@ def extract_technical_profile(paper_dict: dict, paper_title: str, fields: list) 
         return {}
 
     try:
+        # Limpiar caracteres de control
         cleaned_response = re.sub(r'[\x00-\x1f]', '', response)
         data = json.loads(cleaned_response)
         # Asegurar que las listas sean listas
@@ -147,7 +205,16 @@ def extract_technical_profile(paper_dict: dict, paper_title: str, fields: list) 
         return data
     except json.JSONDecodeError as e:
         writeLog("warning", logger, f"[TechAnnex] JSON decode error: {e}")
-        writeLog("warning", logger, f"Response snippet: {response[:200]}")
+        writeLog("warning", logger, f"Response snippet: {response[:300]}")
+        # Intentar reparar: a veces el JSON está cortado por la mitad
+        # Si termina sin cerrar, añadir llaves
+        if response and response.count('{') > response.count('}'):
+            response += '}' * (response.count('{') - response.count('}'))
+            try:
+                data = json.loads(response)
+                return data
+            except:
+                pass
         return {}
 
 

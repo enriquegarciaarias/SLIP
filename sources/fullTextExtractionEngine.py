@@ -1,4 +1,5 @@
 from sources.common.common import logger, processControl, writeLog
+from sources.common.utils import inicioModulo
 
 import json
 import re
@@ -164,14 +165,7 @@ def full_text_engine(selected_papers, pdf_dir):
 
 
 def processFullTextExtraction():
-    writeLog("info", logger, "🚀 [START] Processing processFullTextExtraction")
-
-    base_input_dir = Path(processControl.env.get("input", ""))
-    base_output_dir = Path(processControl.env.get("output", ""))
-    subject = processControl.args.subject
-
-    output_dir = base_output_dir / subject
-
+    input_dir, output_dir = inicioModulo("processFullTextExtraction")
     selected_file = output_dir / "selected_papers.json"
     pdf_dir = output_dir / "pdfs"
 

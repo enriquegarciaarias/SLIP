@@ -58,15 +58,12 @@ def build_google_scholar_url(paper: dict) -> str:
 
     return f"https://scholar.google.com/scholar?hl=en&as_sdt=0%2C5&q={encoded_query}&btnG="
 
-
 import os
 import sys
 import time
 import shutil
 import select
 from pathlib import Path
-
-
 
 def get_nonblocking_input(timeout=0.5):
     """
@@ -101,7 +98,7 @@ def manual_pdf_intervention(paper, pdf_dir, idx, total):
         print("=" * 70)
         print(f"\nPaper ID: {paper_id}")
         print(f"Título: {paper.get('title', 'Sin título')}")
-        print("\n📄 Se ha(n) detectado PDF(s) en la carpeta 'manual'.")
+        print(f"\n📄 Se ha(n) detectado PDF(s) en la carpeta {manual_dir}.")
         print("   Se procesará automáticamente el primer archivo.")
         pdf_file = existing_pdfs[0]
         target_filename = f"{paper_id}.pdf"
@@ -142,7 +139,7 @@ def manual_pdf_intervention(paper, pdf_dir, idx, total):
     print("   N = Omitir este paper (no se descargará)")
     print("   F = Finalizar (todos los restantes se marcan como omitidos)")
     print("\n⏳ El sistema esperará hasta 60 segundos para detectar automáticamente un PDF.")
-    print("   Si colocas un PDF en la carpeta 'manual', se detectará automáticamente.")
+    print(f"   Si colocas un PDF en la carpeta {manual_dir}, se detectará automáticamente.")
     print("   Puedes escribir N o F en cualquier momento (sin Enter).")
     print("   Si no ocurre nada, se te pedirá que decidas manualmente.")
 
@@ -215,7 +212,7 @@ def manual_pdf_intervention(paper, pdf_dir, idx, total):
     # - Hubo 'y' pero no se encontró PDF (raro)
     # - Hubo error al mover el PDF
     print("\n⏰ Tiempo de espera automática finalizado.")
-    print("   Puedes colocar el PDF en la carpeta 'manual' y luego teclear Y.")
+    print(f"   Puedes colocar el PDF en la carpeta {manual_dir} y luego teclear Y.")
     print("   O teclear N para omitir, o F para finalizar.")
 
     # Ahora sí, usamos input() tradicional

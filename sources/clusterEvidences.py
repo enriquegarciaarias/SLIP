@@ -14,15 +14,15 @@ from collections import defaultdict
 # --------------------------------------------------
 EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
 
-# 🔥 Umbrales base ajustados para ser más laxos.
 CLUSTER_THRESHOLDS = [
-    (10, 0.30),   # n >= 10 → umbral 0.30
-    (6, 0.35),    # n >= 6  → umbral 0.35
-    (3, 0.40),    # n >= 3  → umbral 0.40
-    (0, 0.45),    # else   → umbral 0.45
+    (10, 0.30),
+    (6, 0.35),
+    (3, 0.40),
+    (0, 0.45),
 ]
 
-FOCUS_TERM_THRESHOLD_FACTOR = 0.95  # Reducción del 5%
+FOCUS_TERM_THRESHOLD_FACTOR = 0.95
+FOCUS_DENSITY_THRESHOLD = 0.30  # Mínimo de evidencias con focus_terms para aplicar relajación
 
 
 def load_focus_terms(input_dir: Path) -> list[str]:
@@ -55,20 +55,51 @@ def extract_evidence_texts(concept_data: dict) -> tuple[list, list]:
     return texts, metadata
 
 
-def get_distance_threshold(n: int, focus_terms: list[str] = None) -> float:
+# --------------------------------------------------
+# PER-CONCEPT FOCUS DENSITY
+# --------------------------------------------------
+
+def compute_focus_density(texts: list[str], focus_terms: list[str]) -> float:
+    """
+    Retorna la fracción de textos que contienen al menos un término de foco.
+    Calculado POR CONCEPTO, usando sus propias evidencias.
+    """
+    if not texts or not focus_terms:
+        return 0.0
+
+    focus_lower = [t.lower() for t in focus_terms]
+    hits = sum(
+        1 for text in texts
+        if any(term in text.lower() for term in focus_lower)
+    )
+    return hits / len(texts)
+
+
+def get_distance_threshold(
+    n:             int,
+    focus_density: float = 0.0,
+) -> float:
+    """
+    Obtiene el umbral de distancia para clustering.
+    El factor de relajación (0.95x) se aplica SOLO si focus_density >= FOCUS_DENSITY_THRESHOLD.
+    """
+    base_threshold = 0.45
     for min_n, threshold in CLUSTER_THRESHOLDS:
         if n >= min_n:
-            if focus_terms:
-                return threshold * FOCUS_TERM_THRESHOLD_FACTOR
-            return threshold
-    return 0.45
+            base_threshold = threshold
+            break
+
+    if focus_density >= FOCUS_DENSITY_THRESHOLD:
+        return base_threshold * FOCUS_TERM_THRESHOLD_FACTOR
+
+    return base_threshold
 
 
 def cluster_evidences(
-    texts: list,
-    metadata: list,
-    model: SentenceTransformer,
-    focus_terms: list[str] = None
+    texts:         list,
+    metadata:      list,
+    model:         SentenceTransformer,
+    focus_density: float = 0.0,
 ) -> dict:
     if len(texts) == 0:
         return {"clusters": {}}
@@ -94,8 +125,10 @@ def cluster_evidences(
     )
 
     n = len(texts)
-    distance_threshold = get_distance_threshold(n, focus_terms)
-    writeLog("info", logger, f"[Clustering] {n} evidencias, threshold={distance_threshold:.3f}")
+    distance_threshold = get_distance_threshold(n, focus_density)
+    writeLog("info", logger,
+        f"[Clustering] {n} evidencias, threshold={distance_threshold:.3f} "
+        f"(focus_density={focus_density:.2f})")
 
     clustering = AgglomerativeClustering(
         n_clusters=None,
@@ -129,15 +162,17 @@ def cluster_evidences(
 
 
 def generate_cluster_summary(
-    cluster_data: dict,
-    concept_id: int,
+    cluster_data:  dict,
+    concept_id:    int,
     concept_query: str,
-    focus_terms: list[str] = None
+    focus_terms:   list[str] = None,
+    focus_density: float = 0.0,
 ) -> dict:
     summary = {
         "concept_id": concept_id,
         "concept_query": concept_query,
         "focus_terms_used": focus_terms or [],
+        "focus_density": round(focus_density, 4),   # NUEVO: métrica por concepto
         "total_evidences": sum(c["size"] for c in cluster_data["clusters"].values()),
         "n_clusters": cluster_data.get("n_clusters", len(cluster_data["clusters"])),
         "clusters": []
@@ -196,10 +231,12 @@ def generate_cluster_summary(
 
 
 def print_cluster_report(summary: dict):
+    """Mantiene el reporte decorativo en el log de producción (por decisión del usuario)."""
     writeLog("info", logger, f"\n{'=' * 60}")
     writeLog("info", logger, f"CONCEPTO {summary['concept_id']}: {summary['concept_query']}")
     if summary.get('focus_terms_used'):
         writeLog("info", logger, f"Focus terms: {', '.join(summary['focus_terms_used'][:10])}")
+        writeLog("info", logger, f"Focus density: {summary.get('focus_density', 0):.2f}")
     writeLog("info", logger, f"{'=' * 60}")
     writeLog("info", logger, f"Total evidencias: {summary['total_evidences']}")
     writeLog("info", logger, f"Número de clusters: {summary['n_clusters']}")
@@ -257,63 +294,76 @@ def processClusterEvidences():
                 "concept_id": concept_id,
                 "concept_query": concept_query,
                 "focus_terms_used": focus_terms or [],
+                "focus_density": 0.0,
                 "total_evidences": 0,
                 "n_clusters": 0,
                 "clusters": []
             })
             continue
 
-        writeLog("info", logger, f"Procesando Concepto {concept_id} ({len(knowledge_units)} evidencias)...")
-
         texts, metadata = extract_evidence_texts(concept)
-        cluster_result = cluster_evidences(texts, metadata, model, focus_terms)
-        summary = generate_cluster_summary(cluster_result, concept_id, concept_query, focus_terms)
+
+        # Calcular densidad de focus_terms para ESTE concepto concreto
+        focus_density = compute_focus_density(texts, focus_terms)
+
+        writeLog("info", logger,
+            f"Procesando Concepto {concept_id} ({len(knowledge_units)} evidencias, "
+            f"focus_density={focus_density:.2f})...")
+
+        cluster_result = cluster_evidences(texts, metadata, model, focus_density)
+        summary = generate_cluster_summary(
+            cluster_result, concept_id, concept_query, focus_terms, focus_density
+        )
         model_evaluations.append(summary)
+
+        # Reporte decorativo (se mantiene en el log, como el usuario prefiere)
         print_cluster_report(summary)
 
-    # Guardar resultados
+    # Guardar resultados JSON
     output_file = output_dir / "clustered_evidences.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(model_evaluations, f, indent=2, ensure_ascii=False)
     writeLog("info", logger, f"[ClusterEvidences] Guardado en {output_file}")
 
-    # 🔥 NUEVO: Resumen estadístico final
+    # Resumen estadístico final (con métricas mejoradas)
     writeLog("info", logger, "\n" + "=" * 80)
     writeLog("info", logger, "📊 RESUMEN ESTADÍSTICO DE CLUSTERING")
     writeLog("info", logger, "=" * 80)
 
     total_clusters = 0
     total_evidences = 0
-    total_papers = 0
+    paper_concept_assignments = 0   # Un paper en 3 conceptos cuenta 3 veces
+    all_unique_papers = set()       # Conjunto único real
 
     for summary in model_evaluations:
         concept_id = summary["concept_id"]
         concept_query = summary["concept_query"]
         n_clusters = len(summary["clusters"])
         n_evidences = summary["total_evidences"]
-        all_papers = set()
+        concept_papers = set()
         for cluster in summary["clusters"]:
-            all_papers.update(cluster["papers"])
-        n_papers = len(all_papers)
+            concept_papers.update(cluster["papers"])
+        all_unique_papers.update(concept_papers)
 
         total_clusters += n_clusters
         total_evidences += n_evidences
-        total_papers += n_papers
+        paper_concept_assignments += len(concept_papers)
 
-        if len(concept_query) > 80:
-            query_short = concept_query[:80] + "..."
-        else:
-            query_short = concept_query
+        query_short = concept_query[:80] + "..." if len(concept_query) > 80 else concept_query
 
-        writeLog("info", logger, f"\n🔹 Concepto {concept_id}: {query_short}")
-        writeLog("info", logger, f"   📄 Evidencias: {n_evidences}")
-        writeLog("info", logger, f"   🗂️  Clusters: {n_clusters}")
-        writeLog("info", logger, f"   📚 Papers únicos: {n_papers}")
+        writeLog("info", logger,
+            f"Concepto {concept_id} [focus_density={summary.get('focus_density', 0):.2f}]: "
+            f"{query_short} — {n_evidences} evidencias, {n_clusters} clusters, "
+            f"{len(concept_papers)} papers"
+        )
 
-    writeLog("info", logger, "\n" + "-" * 80)
-    writeLog("info", logger, f"✅ Total de evidencias procesadas: {total_evidences}")
-    writeLog("info", logger, f"✅ Total de clusters formados: {total_clusters}")
-    writeLog("info", logger, f"✅ Total de papers únicos (sumando conceptos): {total_papers}")
+    writeLog("info", logger, "-" * 80)
+    writeLog("info", logger, f"Total evidencias procesadas: {total_evidences}")
+    writeLog("info", logger, f"Total clusters formados: {total_clusters}")
+    writeLog("info", logger,
+        f"Asignaciones paper-concepto: {paper_concept_assignments} "
+        f"(un mismo paper puede contar en varios conceptos)")
+    writeLog("info", logger, f"Papers únicos en el proyecto: {len(all_unique_papers)}")
     writeLog("info", logger, "=" * 80)
 
 

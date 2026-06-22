@@ -19,10 +19,10 @@ from sklearn.cluster import AgglomerativeClustering
 
 EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
 
-# 🔥 Umbrales de similitud ajustados para ser menos agresivos.
+# Umbrales de similitud para la extracción de ventanas
 SIMILARITY_PERCENTILE_CUTOFF = 30      # Retiene el 70% de las ventanas (más laxo)
-SIMILARITY_ABSOLUTE_FLOOR = 0.30       # Piso absoluto más bajo
-MAX_EVIDENCES_PER_CONCEPT = 80         # Permitimos más fragmentos para cubrir todos los papers
+SIMILARITY_ABSOLUTE_FLOOR = 0.30       # Piso absoluto
+MAX_EVIDENCES_PER_CONCEPT = 80         # Límite total de evidencias por concepto
 
 # Parámetros de ventanas deslizantes
 WINDOW_SIZE = 5
@@ -30,14 +30,18 @@ WINDOW_STEP = 2
 MIN_SENTENCES = 3
 MIN_WINDOW_WORDS = 20
 
-# 🔥 Umbral absoluto para retener una ventana (bajado para que pasen más)
-MIN_WINDOW_SIMILARITY = 0.05           # Muy bajo para capturar prácticamente todo
+# Umbral mínimo para que una ventana sea considerada (muy bajo para capturar todos)
+MIN_WINDOW_SIMILARITY = 0.05
 
 # Peso del boost por términos de foco (sensores)
 FOCUS_TERM_BOOST_WEIGHT = 0.15
 
 # Umbral para clustering intra-documento (más estricto que el global)
-INTRADOC_CLUSTER_THRESHOLD = 0.4       # Distancia coseno para agrupar fragmentos similares dentro del mismo paper
+INTRADOC_CLUSTER_THRESHOLD = 0.4
+
+# 🔥 NUEVO: Umbral mínimo de similitud para rescatar un documento
+# Si la mejor evidencia de un documento no supera este umbral, NO se rescata.
+MIN_RESCUE_SIMILARITY = 0.5
 
 # --------------------------------------------------
 # MODELS
@@ -290,7 +294,7 @@ def cluster_document_evidences(
 
 
 # --------------------------------------------------
-# CONCEPT PROCESSING (con clusterización intra-documento y rescate)
+# CONCEPT PROCESSING (con clusterización intra-documento y rescate controlado)
 # --------------------------------------------------
 
 def process_concept(concept: dict, focus_terms: list[str] = None) -> dict:
@@ -300,7 +304,7 @@ def process_concept(concept: dict, focus_terms: list[str] = None) -> dict:
     2. Elimina duplicados.
     3. Clusteriza intra-documento para reducir redundancia.
     4. Aplica filtro de percentil global.
-    5. Rescata al menos una evidencia por documento.
+    5. Rescata al menos una evidencia por documento (solo si supera MIN_RESCUE_SIMILARITY).
     6. Limita a MAX_EVIDENCES_PER_CONCEPT.
     """
     all_evidences = []
@@ -331,7 +335,6 @@ def process_concept(concept: dict, focus_terms: list[str] = None) -> dict:
     reduced_evidences = []
     for doc_id, evs in docs_evidences.items():
         if len(evs) > 1:
-            # Clusterizar y quedarse con la mejor de cada cluster
             clustered = cluster_document_evidences(evs, embedding_model)
             reduced_evidences.extend(clustered)
             if len(evs) > len(clustered):
@@ -343,19 +346,23 @@ def process_concept(concept: dict, focus_terms: list[str] = None) -> dict:
     # Re-ordenar globalmente después de la reducción
     reduced_evidences.sort(key=lambda x: x["similarity"], reverse=True)
 
-    # 🔥 PASO 2: Aplicar filtro de percentil global (opcional pero útil)
+    # 🔥 PASO 2: Aplicar filtro de percentil global
     filtered = filter_by_percentile_threshold(reduced_evidences)
 
-    # 🔥 PASO 3: Rescatar al menos una evidencia por documento
+    # 🔥 PASO 3: Rescatar al menos una evidencia por documento (con umbral mínimo)
     represented_docs = set(ev["doc_id"] for ev in filtered)
     for doc_id, evs in docs_evidences.items():
         if doc_id not in represented_docs and evs:
-            # Tomar la mejor evidencia de este documento (ya ordenadas por similitud)
-            best_for_doc = evs[0]  # porque unique ya está ordenado globalmente
-            filtered.append(best_for_doc)
-            represented_docs.add(doc_id)
-            writeLog("debug", logger,
-                     f"[Evidence] Rescued best evidence for doc {doc_id} (sim={best_for_doc['similarity']:.3f})")
+            best_for_doc = evs[0]  # mejor evidencia (ya ordenada)
+            # Solo rescatar si supera el umbral mínimo
+            if best_for_doc["similarity"] >= MIN_RESCUE_SIMILARITY:
+                filtered.append(best_for_doc)
+                represented_docs.add(doc_id)
+                writeLog("debug", logger,
+                         f"[Evidence] Rescued best evidence for doc {doc_id} (sim={best_for_doc['similarity']:.3f})")
+            else:
+                writeLog("debug", logger,
+                         f"[Evidence] Doc {doc_id} NOT rescued (sim={best_for_doc['similarity']:.3f} < {MIN_RESCUE_SIMILARITY})")
 
     # Re-ordenar final
     filtered.sort(key=lambda x: x["similarity"], reverse=True)
@@ -377,7 +384,7 @@ def build_evidence_layer(aligned_concepts: dict, focus_terms: list[str] = None) 
         concepts_output.append(process_concept(concept, focus_terms))
 
     return {
-        "schema_version": "1.5",   # 🔥 Versión actualizada con intra-doc clustering
+        "schema_version": "1.6",   # 🔥 Versión con rescate controlado por umbral
         "embedding_model": EMBEDDING_MODEL,
         "focus_terms_used": focus_terms or [],
         "concepts": concepts_output
@@ -429,7 +436,7 @@ def processConceptEvidence():
     # Expansión de queries (si está disponible)
     expansion_config = {
         "llm_backend": "ollama",
-        "llm_model": "llama3.2:3b",
+        "llm_model": "qwen3:8b",   # era "llama3.2:3b"
         "llm_url": "http://localhost:11434/api/generate",
         "max_expansion_terms": 7,
         "replace_query": False,
