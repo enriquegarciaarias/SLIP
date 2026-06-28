@@ -22,8 +22,8 @@ def manageArgs():
     @Result: Returns parsed arguments as a Namespace object.
     """
     parser = argparse.ArgumentParser(description="Main process for Scientific Literature Intelligence Pipeline (SLIP) handling.")
-    parser.add_argument('--subject', type=str, help="Subject of investigation", default="ValidacionUsuario")
-    parser.add_argument('--proc', type=str, help="Process type: proc", default="proc")
+    parser.add_argument('--subject', type=str, help="Subject of investigation", default="sensores")
+    parser.add_argument('--proc', type=str, help="Process type: proc", default="SLIP")
 
     args = parser.parse_args()
     return args
@@ -127,7 +127,6 @@ def manageDatasetVars():
     return datasetVars
 
 
-
 def getConfigs():
     """
     @Desc: Load environment settings, arguments, and hyperparameters.
@@ -140,3 +139,4 @@ def getConfigs():
     processControl.datasetVars = manageDatasetVars()
 
     setEnvironment()
+    writeLog("info", logger, "Configuration loaded.")

@@ -1,202 +1,261 @@
-# query_expander.py
+"""
+query_expander.py
+=================
+Expande queries de conceptos usando un LLM para enriquecer la recuperación
+de documentos académicos.
+
+Cambios respecto a la versión anterior:
+  - Sin mutación de dicts externos: trabaja con copias (inmutabilidad)
+  - Sin print(): todo el logging pasa por writeLog
+  - Lógica de selección de prompt centralizada en _resolve_prompt()
+  - Config cargada fuera del constructor (SRP); __init__ sólo recibe dicts
+  - Tipos explícitos en toda la interfaz pública
+  - SIN configuración LLM interna: delegada 100% a llm_client.py
+"""
+
+from __future__ import annotations
+
 import json
 import os
-import re
-from typing import List, Dict, Optional
-import ollama
-import logging
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from sources.common.common import logger, writeLog
+from sources.common.llm_client import LLMClient, create_resilient_ollama_client
 
+
+# ---------------------------------------------------------------------------
+# Objeto de configuración tipado (evita accesos a dict con .get por doquier)
+# NOTA: Las variables de LLM (modelo, reintentos, tokens) se han ELIMINADO.
+# Se leen automáticamente desde processControl.defaults.llm vía llm_client.py
+# ---------------------------------------------------------------------------
+
+@dataclass
+class QueryExpanderConfig:
+    enabled: bool = True
+    max_expansion_terms: int = 7
+    replace_query: bool = False
+    # Prompts específicos por concept_id  {"concept_id": "prompt…"}
+    concept_specific_prompts: Dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "QueryExpanderConfig":
+        """Construye la config desde un dict (e.g. JSON cargado por el caller)."""
+        return cls(
+            enabled=data.get("enabled", True),
+            max_expansion_terms=data.get("max_expansion_terms", 7),
+            replace_query=data.get("replace_query", False),
+            # Ignoramos llm_model o max_retries si existieran en el JSON por compatibilidad hacia atrás
+            concept_specific_prompts=data.get("concept_specific_prompts", {}),
+        )
+
+    @classmethod
+    def from_file(cls, path: str) -> "QueryExpanderConfig":
+        """Lee un JSON y construye la config. Lanza FileNotFoundError si no existe."""
+        with open(path, "r", encoding="utf-8") as fh:
+            return cls.from_dict(json.load(fh))
+
+
+# ---------------------------------------------------------------------------
+# Resultado de expansión (no mutamos el dict original)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ExpansionResult:
+    concept_id: str
+    original_query: str
+    expanded_queries: List[str]
+    success: bool
+
+    def apply_to(self, concept: Dict) -> Dict:
+        """
+        Devuelve una COPIA del dict original con los campos de expansión añadidos.
+        No muta el dict recibido.
+        """
+        updated = dict(concept)
+        updated["original_query"] = self.original_query
+        updated["expanded_queries"] = self.expanded_queries
+        return updated
+
+
+# ---------------------------------------------------------------------------
+# Servicio principal
+# ---------------------------------------------------------------------------
 
 class QueryExpander:
     """
-    Expande queries usando Ollama (con biblioteca oficial)
+    Servicio que expande la query de un concepto usando un LLM.
 
-    La expansión puede venir de dos lugares (por orden de prioridad):
-    1. expansion_prompt dentro del propio concepto (desde conceptsQuery.json)
-    2. concept_specific_prompts en el archivo de configuración
-    3. Prompt genérico basado en query + nombre + descripción
+    Recibe su configuración ya construida (no lee ficheros por sí mismo)
+    y el cliente LLM por inyección de dependencias. Si no se inyecta,
+    usa la factory resilient por defecto (que lee de processControl).
     """
 
-    def __init__(self, config: Dict = None, config_file: str = None):
-        self.config = config or {}
+    _SYSTEM_PROMPT = "You are a JSON generator that returns a JSON array of strings."
 
-        # Cargar configuración desde archivo si existe
-        if config_file and os.path.exists(config_file):
-            with open(config_file, 'r', encoding='utf-8') as f:
-                file_config = json.load(f)
-                self.config.update(file_config)
+    def __init__(
+        self,
+        config: Optional[QueryExpanderConfig] = None,
+        llm_client: Optional[LLMClient] = None,
+    ) -> None:
+        self._config = config or QueryExpanderConfig()
+        # Si no se inyecta cliente, se crea uno resiliente usando la config global
+        self._llm = llm_client or create_resilient_ollama_client()
 
-        self.model = self.config.get("llm_model", "llama3.2:3b")
-        self.enabled = self.config.get("enabled", True)
-        self.max_terms = self.config.get("max_expansion_terms", 7)
-        self.replace_query = self.config.get("replace_query", False)
-        self.concept_specific_prompts = self.config.get("concept_specific_prompts", {})
+    # ------------------------------------------------------------------
+    # API pública
+    # ------------------------------------------------------------------
 
-    def expand_query(self, concept: Dict) -> Dict:
-        """Expande la query de un concepto con términos relacionados."""
-        concept_id = str(concept.get("concept_id"))
-        original_query = concept.get("concept_query", "")
+    def expand_query(self, concept: Dict) -> ExpansionResult:
+        """
+        Expande la query de un concepto.
+        Devuelve un ExpansionResult; no muta el dict de entrada.
+        """
+        concept_id = str(concept.get("concept_id", "unknown"))
+        original_query = concept.get("concept_query", "") or concept.get("concept_name", "")
         concept_name = concept.get("concept_name", "")
         concept_desc = concept.get("concept_description", "")
+        inline_prompt = concept.get("expansion_prompt", "")
 
-        # Leer expansion_prompt directamente del concepto
-        concept_expansion_prompt = concept.get("expansion_prompt", "")
-
-        if not self.enabled:
-            concept["expanded_queries"] = []
-            return concept
-
-        if not original_query:
-            original_query = concept_name
-
-        if not original_query:
-            concept["expanded_queries"] = []
-            return concept
-
-        # Prioridad: 1. expansion_prompt del concepto, 2. config prompts, 3. genérico
-        if concept_expansion_prompt:
-            specific_prompt = concept_expansion_prompt
-            print(f"[QueryExpander] Concept {concept_id}: using concept-specific expansion_prompt")
-        else:
-            specific_prompt = self.concept_specific_prompts.get(concept_id)
-            if specific_prompt:
-                print(f"[QueryExpander] Concept {concept_id}: using config-specific prompt")
-
-        prompt = self._build_expansion_prompt(
-            original_query, concept_name, concept_desc, specific_prompt
+        empty_result = ExpansionResult(
+            concept_id=concept_id,
+            original_query=original_query,
+            expanded_queries=[],
+            success=False,
         )
 
-        try:
-            # Usar la biblioteca oficial de Ollama
-            response = ollama.generate(
-                model=self.model,
-                prompt=prompt,
-                options={
-                    "temperature": 0.2,
-                    "num_predict": 300,
-                }
-            )
+        if not self._config.enabled:
+            return empty_result
 
-            raw_output = response['response'].strip()
-            print(f"[QueryExpander] Raw output for concept {concept_id}: {raw_output[:200]}...")
+        if not original_query:
+            writeLog("warning", logger,
+                     f"[QueryExpander] Concept {concept_id}: no query or name, skipping")
+            return empty_result
 
-            # Extraer JSON array usando regex (más robusto)
-            expanded_terms = self._extract_json_array(raw_output)
+        prompt = self._build_prompt(
+            query=original_query,
+            name=concept_name,
+            desc=concept_desc,
+            inline_prompt=inline_prompt,
+            concept_id=concept_id,
+        )
 
-            if not expanded_terms:
-                # Intentar con otro patrón más flexible
-                expanded_terms = self._extract_json_array_flexible(raw_output)
+        terms = self._llm.generate_json_array(
+            prompt=prompt,
+            system_prompt=self._SYSTEM_PROMPT,
+            context=f"concept:{concept_id}",
+        )
 
-            if not expanded_terms:
-                raise ValueError("No valid JSON array found in response")
+        if not terms:
+            writeLog("warning", logger,
+                     f"[QueryExpander] Concept {concept_id}: expansion returned no terms")
+            return empty_result
 
-            concept["expanded_queries"] = expanded_terms[:self.max_terms]
-            concept["original_query"] = original_query
+        trimmed = terms[: self._config.max_expansion_terms]
+        writeLog(
+            "info", logger,
+            f"[QueryExpander] Concept {concept_id}: '{original_query}' → {len(trimmed)} terms "
+            f"(preview: {trimmed[:3]})",
+        )
 
-            print(f"[QueryExpander] Concept {concept_id}: expanded '{original_query}' → +{len(expanded_terms)} terms")
-            if expanded_terms:
-                print(f"  → Terms: {expanded_terms[:3]}...")
+        return ExpansionResult(
+            concept_id=concept_id,
+            original_query=original_query,
+            expanded_queries=trimmed,
+            success=True,
+        )
 
-        except Exception as e:
-            print(f"[QueryExpander] Failed for concept {concept_id}: {e}")
-            print(f"  Raw output was: {raw_output[:200]}...")
-            concept["expanded_queries"] = []
+    def expand_all(self, aligned_concepts: Dict) -> Dict:
+        """
+        Expande todos los conceptos de un dict con estructura
+        {"aligned_concepts": [...]} y devuelve una COPIA actualizada.
+        """
+        if not self._config.enabled:
+            writeLog("info", logger, "[QueryExpander] Expansion disabled, skipping")
+            return aligned_concepts
 
-        return concept
+        updated_concepts: List[Dict] = []
+        for concept in aligned_concepts.get("aligned_concepts", []):
+            result = self.expand_query(concept)
+            updated_concepts.append(result.apply_to(concept))
 
-    def _extract_json_array(self, text: str) -> List[str]:
-        """Extrae un JSON array del texto, normalizando comillas simples."""
-        # Buscar patrón de array con comillas simples o dobles
-        pattern = r'\[(.*?)\]'
-        match = re.search(pattern, text, re.DOTALL)
+        return {**aligned_concepts, "aligned_concepts": updated_concepts}
 
-        if match:
-            array_content = match.group(1)
+    # ------------------------------------------------------------------
+    # Helpers privados
+    # ------------------------------------------------------------------
 
-            # Normalizar: reemplazar comillas simples por dobles
-            # Pero solo las que están alrededor de strings
-            normalized = re.sub(r"'([^']*)'", r'"\1"', array_content)
-            normalized = f"[{normalized}]"
+    def _resolve_prompt(self, inline_prompt: str, concept_id: str) -> Optional[str]:
+        """
+        Determina el prompt específico a usar, si existe.
+        Prioridad: inline (en el propio concepto) > config por concept_id > None
+        """
+        if inline_prompt:
+            writeLog("info", logger,
+                     f"[QueryExpander] Concept {concept_id}: using inline expansion_prompt")
+            return inline_prompt
 
-            try:
-                terms = json.loads(normalized)
-                if isinstance(terms, list):
-                    return [str(t) for t in terms]
-            except json.JSONDecodeError:
-                pass
+        config_prompt = self._config.concept_specific_prompts.get(concept_id)
+        if config_prompt:
+            writeLog("info", logger,
+                     f"[QueryExpander] Concept {concept_id}: using config-specific prompt")
+            return config_prompt
 
-        return []
+        return None
 
-    def _extract_json_array_flexible(self, text: str) -> List[str]:
-        """Extrae JSON array de manera flexible, normalizando comillas."""
-        # Limpiar markdown y código
-        cleaned = re.sub(r'```json\s*|\s*```', '', text)
-        cleaned = re.sub(r'^[^{[]*', '', cleaned)
-        cleaned = re.sub(r'[^}\]]*$', '', cleaned)
+    def _build_prompt(
+        self,
+        query: str,
+        name: str,
+        desc: str,
+        inline_prompt: str,
+        concept_id: str,
+    ) -> str:
+        """Devuelve el prompt final, específico o genérico."""
+        specific = self._resolve_prompt(inline_prompt, concept_id)
+        if specific:
+            return specific
 
-        # Buscar array
-        pattern = r'\[(.*?)\]'
-        match = re.search(pattern, cleaned, re.DOTALL)
-
-        if match:
-            array_content = match.group(1)
-
-            # Intentar extraer items con comillas simples o dobles
-            # Primero probar con comillas dobles
-            items = re.findall(r'"([^"]*)"', array_content)
-            if not items:
-                # Si no, probar con comillas simples
-                items = re.findall(r"'([^']*)'", array_content)
-
-            if items:
-                return items
-
-        return []
-
-    def _build_expansion_prompt(self, query: str, name: str, desc: str, specific_prompt: str = None) -> str:
-        """Construye el prompt para el LLM - versión estricta para JSON."""
-
-        base_instruction = f"""You are a JSON generator. Respond ONLY with a valid JSON array. No explanations. No markdown. No code blocks.
-
-Example: ["term1", "term2", "term3"]
-
-Generate a JSON array of {self.max_terms} alternative phrases, synonyms, and related technical terms that would help retrieve relevant academic papers.
-
-Requirements for each term:
-- Short phrase (2-6 words)
-- Technical and academic terminology
-- Specific, not generic
-
-Respond ONLY with the JSON array, nothing else."""
-
-        if specific_prompt:
-            return f"""{base_instruction}
-
-SPECIFIC GUIDANCE: {specific_prompt}
-
-Original concept: {query}"""
-
-        return f"""{base_instruction}
-
-Original concept: {query}
-Concept name: {name}
-Description: {desc}"""
+        return (
+            f"Generate a JSON array of {self._config.max_expansion_terms} alternative phrases, "
+            f"synonyms, and related technical terms that would help retrieve relevant academic papers.\n\n"
+            f"Requirements:\n"
+            f"- Each term is a short phrase (2-6 words)\n"
+            f"- Technical and academic terminology\n"
+            f"- Specific, not generic\n\n"
+            f'Example: ["term1", "term2", "term3"]\n\n'
+            f"Original concept: {query}\n"
+            f"Concept name: {name}\n"
+            f"Description: {desc}\n\n"
+            f"Respond ONLY with the JSON array, nothing else."
+        )
 
 
-def expand_all_concepts(aligned_concepts: Dict, config: Dict = None, config_file: str = None) -> Dict:
-    """Expande todas las queries en aligned_concepts."""
-    expander = QueryExpander(config, config_file)
+# ---------------------------------------------------------------------------
+# Helpers de conveniencia para compatibilidad con código existente
+# ---------------------------------------------------------------------------
 
-    if not expander.enabled:
-        print("[QueryExpander] Expansion disabled, skipping...")
-        return aligned_concepts
+def load_config(config_dict: Optional[Dict] = None, config_file: Optional[str] = None) -> QueryExpanderConfig:
+    """
+    Carga la config desde un dict o fichero. El caller decide cuándo leer disco.
+    Si se pasan ambos, el fichero tiene precedencia sobre el dict.
+    """
+    if config_file and os.path.exists(config_file):
+        return QueryExpanderConfig.from_file(config_file)
+    if config_dict:
+        return QueryExpanderConfig.from_dict(config_dict)
+    return QueryExpanderConfig()
 
-    expanded_concepts = []
-    for concept in aligned_concepts.get("aligned_concepts", []):
-        expanded_concept = expander.expand_query(concept)
-        expanded_concepts.append(expanded_concept)
 
-    aligned_concepts["aligned_concepts"] = expanded_concepts
-    return aligned_concepts
+def expand_all_concepts(
+    aligned_concepts: Dict,
+    config: Optional[Dict] = None,
+    config_file: Optional[str] = None,
+) -> Dict:
+    """
+    Función de conveniencia que mantiene la firma original para
+    compatibilidad con código existente.
+    """
+    cfg = load_config(config, config_file)
+    expander = QueryExpander(config=cfg)
+    return expander.expand_all(aligned_concepts)

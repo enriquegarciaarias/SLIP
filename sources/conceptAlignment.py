@@ -8,7 +8,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import json
 from pathlib import Path
-import requests   # Para llamada al LLM opcional
 
 # --------------------------------------------------
 # CONFIG
@@ -17,24 +16,23 @@ import requests   # Para llamada al LLM opcional
 EMBEDDING_MODEL          = "BAAI/bge-large-en-v1.5"
 TOP_K_ASSIGNMENTS        = 3
 ALIGNMENT_SCORE_THRESHOLD = 0.40
-TOP_DOCS_PER_CONCEPT     = 30
 TOPIC_DOC_TEXT_LIMIT     = 4000
 TOPIC_DOCS_FOR_EMBEDDING = 10
 USE_ENHANCED_EMBEDDINGS  = True
 
-# ---- Nuevas configuraciones ----
-LLM_EXPAND_PROMPT = False    # Mantener False; llama3.2:3b no es adecuado para expansión
-LLM_CONFIG = {
-    "backend": "ollama",
-    "model": "llama3.2:3b",
-    "url": "http://localhost:11434/api/generate",
-}
+# --- Configuración de Re-ranking y Selección Dinámica ---
 RERANK_PERCENTILE = 60
 MIN_DOCS_AFTER_RERANK = 5
 
 # Peso para combinar scores de alineación y re-ranking
 ALIGNMENT_SCORE_WEIGHT = 0.3
 RERANK_SCORE_WEIGHT = 0.7
+
+# --- Límites dinámicos de documentos por concepto ---
+# Ya NO usamos un corte duro de 30. Usamos calidad.
+MIN_DOCS_PER_CONCEPT = 5       # Mínimo absoluto para poder analizar un concepto
+MAX_DOCS_PER_CONCEPT = 60      # Tope de seguridad para no saturar el siguiente paso
+MIN_RERANK_SCORE = 0.45         # Umbral de calidad mínimo para aceptar un documento
 
 
 # --------------------------------------------------
@@ -88,49 +86,16 @@ def build_concept_text(concept: dict) -> str:
     return " ".join(parts)
 
 
-def expand_prompt_with_llm(prompt_text: str) -> str:
-    if not LLM_EXPAND_PROMPT:
-        return prompt_text
-    system_prompt = (
-        "You are an AI assistant that generates a concise list of search terms "
-        "and synonyms for a given concept. Output only a space-separated list "
-        "of relevant terms (no explanations, no numbering)."
-    )
-    user_prompt = f"Generate specific search terms for: {prompt_text}"
-    try:
-        response = requests.post(
-            LLM_CONFIG["url"],
-            json={
-                "model": LLM_CONFIG["model"],
-                "prompt": f"{system_prompt}\n\n{user_prompt}",
-                "stream": False,
-            },
-            timeout=30,
-        )
-        if response.status_code == 200:
-            result = response.json()
-            generated = result.get("response", "").strip()
-            if generated:
-                writeLog("info", logger, f"[LLM Expansion] Generated: {generated[:200]}...")
-                return generated
-        writeLog("warning", logger, "[LLM Expansion] Failed, using original prompt.")
-        return prompt_text
-    except Exception as e:
-        writeLog("warning", logger, f"[LLM Expansion] Exception: {e}, using original prompt.")
-        return prompt_text
-
-
 def build_objective_text(concept: dict, focus_terms: list[str] = None) -> str:
+    """
+    Construye el texto de embedding para el objetivo de investigación.
+    Se duplican los focus_terms para darles más peso semántico.
+    """
     parts = [
         concept.get("name", ""),
         concept.get("query", ""),
         concept.get("description", ""),
     ]
-    expansion_raw = concept.get("expansion_prompt", "")
-    if expansion_raw:
-        expansion = expand_prompt_with_llm(expansion_raw)
-        parts.append(expansion)
-        parts.append(expansion)
     if focus_terms:
         focus_text = " ".join(focus_terms)
         parts.append(focus_text)
@@ -229,7 +194,6 @@ def encode_alignment_space_enhanced(
     for c in discovered_concepts["concepts"]:
         concept_type = determine_concept_type(c)
         text = build_enhanced_concept_text(c, corpus, concept_type)
-        # No añadimos focus_terms aquí para no sesgar
         discovered_texts.append(text)
 
     objective_texts = [build_objective_text(c, focus_terms) for c in objective_concepts["concepts"]]
@@ -276,7 +240,7 @@ def compute_alignment(
 
 
 # --------------------------------------------------
-# RE-RANKING DINÁMICO (mejoras)
+# RE-RANKING DINÁMICO
 # --------------------------------------------------
 
 def rerank_documents_with_concept(
@@ -296,11 +260,6 @@ def rerank_documents_with_concept(
         concept.get("query", ""),
         concept.get("description", ""),
     ]
-    expansion_raw = concept.get("expansion_prompt", "")
-    if expansion_raw:
-        expansion = expand_prompt_with_llm(expansion_raw)
-        concept_parts.append(expansion)
-        concept_parts.append(expansion)
     if focus_terms:
         focus_text = " ".join(focus_terms)
         concept_parts.append(focus_text)
@@ -312,7 +271,6 @@ def rerank_documents_with_concept(
     doc_texts = []
     for doc in docs:
         title = doc.get("title", "")
-        # Priorizar sección específica
         section_text = doc.get("section_text", "")
         if section_text and len(section_text) > 100:
             body = section_text[:2000]
@@ -341,17 +299,12 @@ def rerank_documents_with_concept(
             combined.append((doc, final_score))
         combined.sort(key=lambda x: x[1], reverse=True)
         filtered = combined
-    """
-    writeLog("info", logger,
-        f"[Rerank] Kept {len(filtered)}/{len(docs)} docs (threshold={threshold:.3f})"
-        + (f", alignment_score={alignment_score:.3f}" if alignment_score is not None else ""))    
-    """
 
     return filtered
 
 
 # --------------------------------------------------
-# DOCUMENT AGGREGATION (usa topic_id y corregido)
+# DOCUMENT AGGREGATION (usa topic_id)
 # --------------------------------------------------
 
 def aggregate_documents_by_objective_concept(
@@ -368,7 +321,6 @@ def aggregate_documents_by_objective_concept(
         topic_id = alignment["topic_id"]
         source_concept = topic_lookup.get(topic_id)
         if source_concept is None:
-            writeLog("info", logger, f"[ConceptAlignment] topic_id {topic_id} not found in candidates")
             continue
 
         for assignment in alignment["assignments"]:
@@ -376,10 +328,6 @@ def aggregate_documents_by_objective_concept(
             objective_id = assignment["objective_concept_id"]
             if score < ALIGNMENT_SCORE_THRESHOLD:
                 continue
-            """
-            writeLog("info", logger,
-                f"[ConceptAlignment] topic {topic_id} → concept {objective_id} (score={score:.4f})")
-            """
 
             for doc in source_concept["documents"]:
                 doc_id = doc["doc_id"]
@@ -390,7 +338,6 @@ def aggregate_documents_by_objective_concept(
     result = {}
     for concept_id, doc_score_map in concept_map.items():
         docs = [doc for doc, _ in doc_score_map.values()]
-        # Obtener alignment_score para cada documento
         alignment_scores = {doc_id: score for doc_id, (doc, score) in doc_score_map.items()}
 
         obj_concept = next(
@@ -418,7 +365,7 @@ def aggregate_documents_by_objective_concept(
 
 
 # --------------------------------------------------
-# OUTPUT ASSEMBLY
+# OUTPUT ASSEMBLY (Selección dinámica por calidad)
 # --------------------------------------------------
 
 def build_aligned_concepts(
@@ -436,9 +383,24 @@ def build_aligned_concepts(
             "keywords":    concept.get("description", "").split(),
         })
 
+        # Ordenar por el score combinado (mayor a menor)
         doc_score_pairs.sort(key=lambda x: x[1] if x[1] is not None else 0, reverse=True)
-        selected_pairs = doc_score_pairs[:TOP_DOCS_PER_CONCEPT]
 
+        # --- FILTRO DINÁMICO (Ya no es [:30] a ciegas) ---
+        # 1. Filtramos por umbral de calidad mínima
+        quality_filtered = [
+            (doc, score) for doc, score in doc_score_pairs
+            if score is not None and score >= MIN_RERANK_SCORE
+        ]
+
+        # 2. Garantizamos un mínimo de documentos si el umbral es muy estricto
+        if len(quality_filtered) < MIN_DOCS_PER_CONCEPT:
+            quality_filtered = doc_score_pairs[:MIN_DOCS_PER_CONCEPT]
+
+        # 3. Aplicamos un tope máximo de seguridad para no saturar la pipeline
+        selected_pairs = quality_filtered[:MAX_DOCS_PER_CONCEPT]
+
+        # --- Construir la salida ---
         documents = []
         scores = []
         for doc, score in selected_pairs:
@@ -500,12 +462,13 @@ def processConceptAlignment():
     )
 
     result = {
-        "schema_version":       "1.4",
+        "schema_version":       "1.5",
         "alignment_threshold":  ALIGNMENT_SCORE_THRESHOLD,
         "use_enhanced":         USE_ENHANCED_EMBEDDINGS,
-        "llm_expand_prompt":    LLM_EXPAND_PROMPT,
+        "selection_policy":     "dynamic_quality", # Indicador de que ya no es hard-limit
         "rerank_percentile":    RERANK_PERCENTILE,
         "min_docs_after_rerank": MIN_DOCS_AFTER_RERANK,
+        "min_rerank_score":     MIN_RERANK_SCORE,
         "focus_terms_used":     bool(focus_terms),
         "score_combination":    {"alpha": ALIGNMENT_SCORE_WEIGHT, "beta": RERANK_SCORE_WEIGHT},
         "n_objective_concepts": len(objective_concepts["concepts"]),
@@ -527,7 +490,7 @@ def processConceptAlignment():
         total_docs += ac.get("n_documents", 0)
         writeLog("info", logger, f"\n🔹 Concepto {ac['concept_id']}:")
         writeLog("info", logger, f"   Pregunta: {ac['concept_query']}")
-        writeLog("info", logger, f"   📄 Documentos: {ac['n_documents']}")
+        writeLog("info", logger, f"   📄 Documentos: {ac['n_documents']} (Dinámico por calidad)")
         writeLog("info", logger, f"   🆔 IDs: {doc_ids_str}")
 
     writeLog("info", logger, "\n" + "-" * 80)

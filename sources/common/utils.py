@@ -10,6 +10,7 @@ import re
 from huggingface_hub import login
 import hashlib
 from pathlib import Path
+from json import JSONDecodeError
 
 
 def huggingface_login():
@@ -143,3 +144,79 @@ def inicioModulo(modulo):
     base_output_dir = Path(processControl.env.get("output", ""))
     subject = processControl.args.subject
     return base_input_dir / subject, base_output_dir / subject
+
+def read_json(filepath: str | Path):
+    """
+    Reads and parses a JSON file.
+
+    Args:
+        filepath: Path to the JSON file.
+
+    Returns:
+        Parsed JSON object (dict, list, etc.).
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        IsADirectoryError: If the path points to a directory.
+        PermissionError: If the file cannot be accessed.
+        ValueError: If the JSON is malformed.
+        OSError: For other I/O related errors.
+    """
+    path = Path(filepath)
+
+    if not path.exists():
+        raise FileNotFoundError(f"JSON file not found: {path}")
+
+    if not path.is_file():
+        raise IsADirectoryError(f"Expected a file, got: {path}")
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            writeLog("info", logger, f"📄 JSON loaded from {filepath}")
+            return json.load(f)
+
+    except JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in '{path}': {e}") from e
+
+def write_json(
+    filepath: str | Path,
+    data,
+    *,
+    indent: int = 4,
+    ensure_ascii: bool = False,
+):
+    """
+    Writes data to a JSON file.
+
+    Args:
+        filepath: Destination JSON file.
+        data: Serializable Python object.
+        indent: JSON indentation.
+        ensure_ascii: Whether to escape non-ASCII characters.
+
+    Raises:
+        TypeError: If data is not JSON serializable.
+        OSError: If the file cannot be written.
+    """
+    path = Path(filepath)
+
+    # Create parent directories if they do not exist
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(
+                data,
+                f,
+                indent=indent,
+                ensure_ascii=ensure_ascii,
+            )
+            f.write("\n")  # POSIX-friendly final newline
+
+        writeLog("info", logger, f"💾 JSON written to {path}")
+
+    except TypeError as e:
+        raise TypeError(f"Object is not JSON serializable: {path}") from e
+
+    except OSError as e:
+        raise OSError(f"Could not write JSON file: {path}") from e

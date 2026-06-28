@@ -1,721 +1,791 @@
-# trainingMaterials.py
-from sources.common.common import logger, processControl, writeLog
-from sources.common.utils import inicioModulo
+"""
+trainingMaterials.py
+====================
+Genera el documento final de materiales de investigación (Markdown)
+a partir de los datos producidos por el pipeline SLIP.
+
+Arquitectura en capas (SOA) — separación MVC aplicada:
+  ┌──────────────────────────────────────────────────────────────┐
+  │             TrainingMaterialsPipeline  (orquestador)         │
+  ├──────────────────────┬───────────────────────────────────────┤
+  │  DocumentDataBuilder │  MarkdownRenderer                     │
+  │  (agrega + filtra    │  (renderiza el modelo de datos        │
+  │   datos del pipeline)│   a Markdown — sin lógica de negocio) │
+  ├──────────────────────┴───────────────────────────────────────┤
+  │  EmergingTopicAnalyzer   │  TranslationService (desde common)│
+  │  (LLM → título+desc)     │  (caché disco + Google Translate) │
+  ├──────────────────────────┴───────────────────────────────────┤
+  │            LLMClient  (federado, suppress_thinking)          │
+  └──────────────────────────────────────────────────────────────┘
+
+Principios aplicados:
+  - SRP  : DocumentDataBuilder construye datos; MarkdownRenderer los presenta.
+  - OCP  : MarkdownRenderer sustituible por HtmlRenderer, PdfRenderer, etc.
+           sin tocar DocumentDataBuilder ni el pipeline.
+  - DIP  : LLMClient inyectado, no instanciado aquí.
+  - Sin globals mutables.
+  - Traducción externalizada a common.translationService.
+"""
+
+from __future__ import annotations
 
 import json
-from pathlib import Path
-from datetime import datetime
 import re
-import requests
-import time
-import hashlib
-from functools import lru_cache
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-# --------------------------------------------------
-# CONFIGURACIÓN
-# --------------------------------------------------
-OFF_TOPIC_THRESHOLD = 0.30
-MAX_CHARS_PER_EMERGING = 8000
-TRANSLATE_EVIDENCES = False
-MAX_EVIDENCES_TO_SHOW = 30
+from tqdm import tqdm  # <-- AÑADIDO
 
-# CHANGED: was 2.5 — out of range for cosine similarity, which is
-# normalized to [0, 1] in practice across this pipeline (see
-# concept_evidence.json, clustered_evidences.json, aligned_concepts.json).
-# With 2.5, no real evidence ever passed the filter — every concept in
-# the final document showed "SIN EVIDENCIA SUFICIENTE" regardless of
-# upstream pipeline quality. 0.35 is consistent with OFF_TOPIC_THRESHOLD
-# and ALIGNMENT_SCORE_THRESHOLD used elsewhere in the pipeline.
-MIN_DISPLAY_SIMILARITY = 0.35
-
-# CHANGED: was llama3.2:3b. This module produces the final document
-# the researcher reads directly — translation quality, emerging-topic
-# titles, and synthesized descriptions all benefit from a larger model.
-# qwen3:8b is already used elsewhere in the pipeline (synthesize_findings)
-# and fits the RTX 4060 in Q4.
-LLM_CONFIG = {
-    "backend": "ollama",
-    "model": "qwen3:8b",
-    "url": "http://localhost:11434/api/generate",
-}
-
-# Disk cache for translations — survives across pipeline re-runs.
-# CHANGED: was in-memory lru_cache only, which reset on every execution.
-# Research pipelines are iterated on heavily; re-translating identical
-# evidence text on every re-run wastes LLM calls and time.
-TRANSLATION_CACHE_FILE = "translation_cache.json"
+from sources.common.common import logger, writeLog
+from sources.common.llm_client import LLMClient, create_ollama_client
+from sources.common.translationService import TranslationService
+from sources.common.utils import inicioModulo
 
 
-# --------------------------------------------------
-# FUNCIONES AUXILIARES
-# --------------------------------------------------
+# ---------------------------------------------------------------------------
+# Configuración tipada
+# ---------------------------------------------------------------------------
 
-def load_json(file_path: Path) -> dict:
-    with open(file_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+@dataclass
+class TrainingConfig:
+    llm_model: str = "qwen3:8b"
+    off_topic_threshold: float = 0.30
+    min_display_similarity: float = 0.35
+    max_evidences_to_show: int = 30
+    max_chars_per_emerging: int = 8000
+    translate_evidences: bool = False  # Ya no se usa para citas, pero mantenemos por compatibilidad
+    translation_cache_file: str = "translation_cache.json"
+    translation_max_chars: int = 3000
+    llm_temperature: float = 0.2
+    llm_max_tokens: int = 1024
+    emerging_max_tokens: int = 2048
+    min_finding_score: float = 0.40
+
+    @classmethod
+    def from_project_config(cls, project: Dict) -> "TrainingConfig":
+        t = project.get("training_materials", {})
+        return cls(
+            llm_model=t.get("llm_model", "qwen3:8b"),
+            off_topic_threshold=t.get("off_topic_threshold", 0.30),
+            min_display_similarity=t.get("min_display_similarity", 0.35),
+            max_evidences_to_show=t.get("max_evidences_to_show", 30),
+            max_chars_per_emerging=t.get("max_chars_per_emerging", 8000),
+            translate_evidences=t.get("translate_evidences", False),
+            min_finding_score=t.get("min_finding_score", 0.40),
+        )
+
+    @classmethod
+    def from_file(cls, study_file: Path) -> "TrainingConfig":
+        if not study_file.exists():
+            return cls()
+        with open(study_file, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return cls.from_project_config(data.get("project", {}))
 
 
-def clean_text_for_markdown(text: str) -> str:
-    if not text:
-        return ""
-    return re.sub(r'\s+', ' ', text).strip()
+# ---------------------------------------------------------------------------
+# Modelo de datos del documento (capa M de MVC)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class EvidenceItem:
+    doc_id: str
+    paper_title: str
+    text: str
+    similarity: float
+    structured_evidence: Dict = field(default_factory=dict, compare=False, hash=False)
 
 
-def call_llm(prompt: str, max_retries: int = 2, num_predict: int = 1024) -> str:
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(
-                LLM_CONFIG["url"],
-                json={
-                    "model": LLM_CONFIG["model"],
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.2, "num_predict": num_predict},
-                },
-                timeout=90,
-            )
-            if response.status_code == 200:
-                result = response.json().get("response", "").strip()
-                if result:
-                    return result
-            else:
-                writeLog("warning", logger, f"LLM error {response.status_code} (attempt {attempt + 1})")
-        except Exception as e:
-            writeLog("warning", logger, f"LLM exception (attempt {attempt + 1}): {e}")
-        time.sleep(2)
-    return ""
+@dataclass(frozen=True)
+class FindingItem:
+    finding_text: str
+    evidence_count: int
+    avg_evidence_score: float
+    top_quotes: Tuple[EvidenceItem, ...]
 
 
-def call_llm_json(prompt: str, max_retries: int = 2, num_predict: int = 2048) -> dict:
+@dataclass(frozen=True)
+class ConceptCard:
+    concept_id: str
+    concept_query: str
+    concept_type: Optional[str]
+    focus_density: Optional[float]
+    findings: Tuple[FindingItem, ...]
+    all_evidences: Tuple[EvidenceItem, ...]
+    represented_papers: Tuple[str, ...]
+    represented_titles: Dict[str, str]
+
+
+@dataclass(frozen=True)
+class EmergingTopic:
+    concept_id: str
+    title: str
+    description: str
+    keywords: Tuple[str, ...]
+    paper_ids: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SearchStrategyStats:
+    query_text: str
+    n_objective_concepts: int
+    n_candidates: int
+    n_aligned: int
+    n_emergent: int
+    relevance_threshold: float
+    min_docs_after_rerank: str
+    focus_terms_used: bool
+
+
+@dataclass(frozen=True)
+class DocumentModel:
+    generated_at: str
+    search_stats: SearchStrategyStats
+    concept_cards: Tuple[ConceptCard, ...]
+    emerging_topics: Tuple[EmergingTopic, ...]
+    technical_concepts: Tuple[Dict, ...]
+    bibliography: Dict[str, str]
+
+
+# ---------------------------------------------------------------------------
+# Capa 1 – Analizador de tópicos emergentes
+# ---------------------------------------------------------------------------
+
+class EmergingTopicAnalyzer:
     """
-    Variant of call_llm that expects a JSON object in the response and
-    parses it. Used by generate_emerging_title_and_description to combine
-    two previously separate LLM calls into one.
-
-    CHANGED: num_predict raised from the call_llm default (1024) to 2048.
-    A combined title+description response (200-300 word description in
-    Spanish, wrapped in JSON) was being truncated mid-object at 1024
-    tokens, producing invalid JSON that failed to parse — visible in
-    logs as "[LLM] Could not parse JSON response" even though the start
-    of the response looked well-formed.
-
-    Strips markdown code fences if the model wraps the JSON in ```json.
-    Returns {} on failure so callers can fall back gracefully.
-    """
-    raw = call_llm(prompt, max_retries, num_predict=num_predict)
-    if not raw:
-        return {}
-    cleaned = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        # NEW: attempt a salvage parse — if the JSON was cut off mid-string,
-        # try to close it and recover at least the title, which appears
-        # first in the requested schema and is usually complete even when
-        # the longer description field gets truncated.
-        title_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
-        desc_match = re.search(r'"description"\s*:\s*"((?:[^"\\]|\\.)*)', cleaned)
-        if title_match:
-            salvaged = {"title": title_match.group(1)}
-            if desc_match:
-                # description may be incomplete (truncated) — keep what we have
-                salvaged["description"] = desc_match.group(1)
-            writeLog("warning", logger,
-                     "[LLM] JSON truncated, salvaged partial title/description")
-            return salvaged
-        writeLog("warning", logger, f"[LLM] Could not parse JSON response: {raw[:200]}")
-        return {}
-
-
-# --------------------------------------------------
-# TRANSLATION CACHE (disk-backed)
-# --------------------------------------------------
-
-def _load_translation_cache(output_dir: Path) -> dict:
-    cache_file = output_dir / TRANSLATION_CACHE_FILE
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_translation_cache(output_dir: Path, cache: dict) -> None:
-    cache_file = output_dir / TRANSLATION_CACHE_FILE
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False)
-
-
-def _text_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-
-
-# Module-level cache, populated at entrypoint, persisted at the end.
-_translation_cache: dict = {}
-
-
-def translate_to_spanish(text: str) -> str:
-    """
-    CHANGED: now backed by a disk-persisted cache (_translation_cache,
-    loaded/saved around the pipeline run) in addition to avoiding
-    redundant work within a single run. Re-running the pipeline after
-    fixing an upstream issue no longer re-translates identical text.
-    """
-    if not text or len(text.strip()) < 10:
-        return text
-
-    clean_text = re.sub(r'\s+', ' ', text).strip()
-    key = _text_hash(clean_text)
-
-    if key in _translation_cache:
-        return _translation_cache[key]
-
-    text_for_prompt = clean_text
-    if len(text_for_prompt) > 3000:
-        text_for_prompt = text_for_prompt[:3000] + "..."
-
-    prompt = f"""Traduce el siguiente texto académico del inglés al español. Mantén el tono formal, la terminología técnica y la puntuación. Devuelve solo la traducción.
-
-Texto original:
-{text_for_prompt}
-
-Traducción al español:"""
-    translated = call_llm(prompt)
-    result = translated if translated else text
-
-    _translation_cache[key] = result
-    return result
-
-
-def format_evidence_strength(avg_score: float, evidence_count: int) -> tuple[str, str]:
-    if evidence_count >= 5 and avg_score >= 0.70:
-        return ("Muy Alta", "🔴")
-    elif evidence_count >= 3 and avg_score >= 0.65:
-        return ("Alta", "🟠")
-    elif evidence_count >= 2 and avg_score >= 0.60:
-        return ("Media", "🟡")
-    elif evidence_count >= 1:
-        return ("Baja", "🟢")
-    else:
-        return ("Sin evidencia", "⚪")
-
-
-# --------------------------------------------------
-# FORMATEO DE EVIDENCIAS (reutilizable)
-# --------------------------------------------------
-
-def format_evidence_blocks(evidences: list, limit: int = MAX_EVIDENCES_TO_SHOW) -> str:
-    """Genera bloques de markdown para una lista de evidencias.
-       Filtra las evidencias por MIN_DISPLAY_SIMILARITY (now in the
-       correct [0,1] cosine similarity range).
-    """
-    if not evidences:
-        return "No hay evidencias disponibles."
-
-    filtered = [ev for ev in evidences if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
-    if not filtered:
-        return f"No hay evidencias con similitud ≥ {MIN_DISPLAY_SIMILARITY}."
-
-    evidences_to_show = filtered[:limit]
-
-    blocks = []
-    for ev in evidences_to_show:
-        evidence_text = clean_text_for_markdown(ev['text'])
-        structured = ev.get("structured_evidence", {})
-        estructurado_md = ""
-        if structured:
-            ideas = structured.get("ideas", "")
-            metodos = structured.get("metodos", "")
-            resultados = structured.get("resultados", "")
-            aplicaciones = structured.get("aplicaciones", "")
-            estructurado_md = f"""
-**Ideas principales:** {ideas} **Métodos:** {metodos} **Resultados:** {resultados} **Aplicaciones relevantes:** {aplicaciones}
-            """
-        blocks.append(f"""
-- **{ev['paper_title']}** (similitud: {ev['similarity']:.3f}) (ID: `{ev['doc_id']}`)
-*"{evidence_text}"*  
-
-{estructurado_md}
-        """)
-    return "\n".join(blocks)
-
-
-# --------------------------------------------------
-# EVALUACIÓN DE LA QUERY
-# --------------------------------------------------
-
-def evaluate_search_strategy(concepts_query: dict, aligned_concepts: dict, candidate_concepts: dict) -> tuple[
-    str, list]:
-    query_obj = concepts_query.get("query", "No disponible")
-    query_obj = clean_text_for_markdown(query_obj)
-    n_objective_concepts = len(concepts_query.get("concepts", []))
-    n_candidates = candidate_concepts.get("n_topics", 0)
-    n_aligned = len(aligned_concepts.get("aligned_concepts", []))
-    threshold = aligned_concepts.get("alignment_threshold", OFF_TOPIC_THRESHOLD)
-    min_docs = aligned_concepts.get("min_docs_after_rerank", "No especificado")
-    focus_terms_used = aligned_concepts.get("focus_terms_used", False)
-
-    aligned_ids = set()
-    for ac in aligned_concepts.get("aligned_concepts", []):
-        aligned_ids.add(ac.get("concept_id"))
-    candidate_list = candidate_concepts.get("concepts", [])
-    emergent_ids = [c.get("concept_id") for c in candidate_list if c.get("concept_id") not in aligned_ids]
-    n_emergent = len(emergent_ids)
-
-    evaluation = f"""
-## Evaluación de la estrategia de búsqueda
-
-### Query utilizada
-{query_obj}    
-
-### Estadísticas de recuperación y filtrado
-- **Conceptos objetivo definidos:** {n_objective_concepts}
-- **Tópicos descubiertos (`candidate_concepts`):** {n_candidates}
-- **Tópicos alineados con conceptos objetivo:** {n_aligned}
-- **Tópicos emergentes no alineados:** {n_emergent}
-- **Umbral de relevancia aplicado:** {threshold}
-- **Mínimo de documentos retenidos por concepto (re‑ranking):** {min_docs}
-- **Focus terms utilizados:** {"Sí" if focus_terms_used else "No"}
-
-    """
-    return evaluation, emergent_ids
-
-
-# --------------------------------------------------
-# GENERACIÓN DE TARJETAS DE HALLAZGOS
-# --------------------------------------------------
-
-def generate_training_card(concept_data: dict, aligned_lookup: dict = None) -> str:
-    """
-    CHANGED: accepts aligned_lookup (concept_id -> aligned concept dict)
-    to surface concept_type and focus_density in the card header —
-    information already computed upstream (conceptAlignmentEngine,
-    clusterEvidences) but previously discarded before reaching the
-    final document.
-    """
-    concept_id = concept_data["concept_id"]
-    concept_query = concept_data["concept_query"]
-    findings = concept_data.get("findings", [])
-    n_findings = concept_data.get("n_findings", 0)
-    all_evidences = concept_data.get("all_evidences", [])
-
-    valid_evidences = [ev for ev in all_evidences if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
-    valid_paper_ids = set(ev["doc_id"] for ev in valid_evidences)
-    if not valid_paper_ids and n_findings > 0:
-        valid_paper_ids = set()
-        for finding in findings:
-            for quote in finding.get("top_quotes", []):
-                if quote.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY:
-                    valid_paper_ids.add(quote["doc_id"])
-    display_papers = list(valid_paper_ids) if valid_paper_ids else []
-
-    header = f"""
-## Concepto {concept_id}: {concept_query}
+    Genera título y descripción de un tópico emergente en una única
+    llamada LLM con output JSON. Responsabilidad única: prompt → EmergingTopic.
     """
 
-    # NEW: surface concept_type and focus_density from upstream modules
-    if aligned_lookup is not None:
-        ac = aligned_lookup.get(concept_id)
-        if ac:
-            meta_parts = []
-            concept_type = ac.get("concept_type")
-            if concept_type and concept_type != "default":
-                meta_parts.append(f"Tipo: `{concept_type}`")
-            focus_density = ac.get("focus_density")
-            if focus_density is not None:
-                meta_parts.append(f"Densidad de vocabulario de foco: {focus_density * 100:.0f}%")
-            if meta_parts:
-                header += f"\n*{' · '.join(meta_parts)}*\n"
+    _SYSTEM_PROMPT = (
+        "You are a research assistant. Analyze the provided academic paper fragments. "
+        "Return ONLY a JSON object with 'title' (max 10 words, Spanish) and "
+        "'description' (200-300 words, Spanish). No markdown fences."
+    )
 
-    if display_papers:
-        paper_list = ', '.join(display_papers[:15])
-        if len(display_papers) > 15:
-            paper_list += f" ... y {len(display_papers) - 15} más"
-        header += f"""
-**Papers representados en las evidencias:** {len(display_papers)} documentos: `{paper_list}`
+    def __init__(self, llm_client: LLMClient, config: TrainingConfig) -> None:
+        self._llm = llm_client
+        self._cfg = config
 
-"""
-
-    if n_findings == 0:
-        filtered_all = [ev for ev in all_evidences if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
-        if filtered_all:
-            return f"""{header}
-### Estado: SIN HALLAZGOS SINTETIZADOS (evidencias sueltas disponibles)
-
-No se generaron hallazgos consolidados para este concepto, pero se encontraron fragmentos relevantes que pueden ser de interés.
-
-**Evidencias textuales relevantes:**
-
-{format_evidence_blocks(filtered_all)}
-            """
-        else:
-            return f"""{header}
-### Estado: SIN EVIDENCIA SUFICIENTE
-
-No se encontraron hallazgos ni evidencias con similitud suficiente para este concepto en el corpus actual.
-            """
-
-    card_parts = []
-    for idx, finding_data in enumerate(findings, 1):
-        finding_text_es = finding_data["finding"]
-        evidence_count = finding_data["evidence_count"]
-        avg_score = finding_data["avg_evidence_score"]
-        strength, emoji = format_evidence_strength(avg_score, evidence_count)
-        top_quotes = finding_data.get("top_quotes", [])
-
-        filtered_top = [q for q in top_quotes if q.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY]
-        if not filtered_top:
-            continue
-
-        card_parts.append(f"""
-### Hallazgo {idx}: {strength}
-
-> {finding_text_es}
-
-**Evidencias textuales que respaldan este hallazgo:**
-
-{format_evidence_blocks(filtered_top)}
-        """)
-
-    if not card_parts:
-        return f"""{header}
-### Estado: SIN EVIDENCIA SUFICIENTE
-
-Los hallazgos generados no tienen citas con similitud suficiente para ser mostradas.
-        """
-
-    return header + "\n---\n".join(card_parts)
-
-
-# --------------------------------------------------
-# CONCEPTOS EMERGENTES — título + descripción combinados
-# --------------------------------------------------
-
-def generate_emerging_title_and_description(concept: dict, papers_text: dict) -> tuple[str, str]:
-    """
-    CHANGED: combines what were two separate LLM calls
-    (generate_emerging_title + generate_emerging_description) into a
-    single call requesting structured JSON output. Halves the number
-    of LLM round-trips for emerging-topic sections, each of which had
-    a 90s timeout and up to 2 retries — meaningful with several
-    emerging concepts per run.
-
-    Falls back to the topic's discovered label / a generic message if
-    the LLM call or JSON parsing fails.
-    """
-    paper_ids = concept.get("document_indices", [])
-    fallback_title = concept.get("label", "Concepto emergente")
-
-    if not paper_ids:
-        return fallback_title, "No hay papers asociados a este concepto."
-
-    texts = []
-    for pid in paper_ids:
-        paper = papers_text.get(pid)
-        if not paper:
-            continue
-        parts = [
-            paper.get("title", ""),
-            paper.get("abstract", ""),
-            paper.get("clean_sections", {}).get("introduction", ""),
-            paper.get("clean_sections", {}).get("conclusion", ""),
-        ]
-        full = " ".join(p for p in parts if p)
-        if len(full) > 1500:
-            full = full[:1500]
-        texts.append(full)
-
-    combined = "\n\n".join(texts)
-    if len(combined) > MAX_CHARS_PER_EMERGING:
-        combined = combined[:MAX_CHARS_PER_EMERGING]
-
-    if not combined.strip():
-        return fallback_title, "No hay texto suficiente para analizar."
-
-    prompt = f"""Eres un asistente de investigación. A continuación tienes fragmentos de artículos científicos que pertenecen a un tópico emergente descubierto automáticamente.
-
-Genera:
-1. Un TÍTULO CONCISO (máximo 10 palabras), en español, sin asteriscos ni negritas.
-2. Una DESCRIPCIÓN de 200-300 palabras en español, resumiendo ideas principales, métodos, resultados y aplicaciones relevantes, en texto continuo y comprensible.
-
-Fragmentos:
-{combined}
-
-Responde ÚNICAMENTE con un objeto JSON con esta forma exacta, sin texto adicional ni bloques de código:
-{{"title": "...", "description": "..."}}"""
-
-    result = call_llm_json(prompt)
-
-    title = result.get("title", "").strip()
-    description = result.get("description", "").strip()
-
-    title = re.sub(r'[*#]', '', title).strip()
-    if len(title) > 100:
-        title = title[:100]
-
-    if not title:
-        title = fallback_title
-    if not description:
-        description = "No se pudo generar una descripción automática."
-    else:
-        description = clean_text_for_markdown(description)
-
-    return title, description
-
-
-# --------------------------------------------------
-# CONCEPTOS EMERGENTES
-# --------------------------------------------------
-
-def generate_emerging_section(emergent_ids: list, candidate_concepts: dict, papers_text: dict) -> str:
-    if not emergent_ids:
-        return "## Conceptos emergentes no alineados\n\nNo se detectaron conceptos emergentes fuera de los objetivos.\n"
-
-    candidate_list = candidate_concepts.get("concepts", [])
-    emergent_concepts = [c for c in candidate_list if c.get("concept_id") in emergent_ids]
-    if not emergent_concepts:
-        return "## Conceptos emergentes no alineados\n\nNo se encontraron metadatos de los conceptos emergentes.\n"
-
-    section = "## Conceptos emergentes (no alineados con sus conceptos objetivo)\n\n"
-    section += "Los siguientes tópicos fueron descubiertos automáticamente en los documentos, pero no superaron el umbral de alineamiento. Pueden indicar áreas relacionadas que merecen atención o servir para afinar sus consultas.\n\n"
-
-    for i, concept in enumerate(emergent_concepts, 1):
-        # CHANGED: single combined call instead of two separate ones
-        title, description = generate_emerging_title_and_description(concept, papers_text)
-
-        keywords = ", ".join(concept.get("keywords", [])[:8])
+    def analyze(self, concept: Dict, papers_text: Dict) -> EmergingTopic:
+        concept_id = str(concept.get("concept_id", "unknown"))
+        fallback_title = concept.get("label", "Concepto emergente")
         paper_ids = concept.get("document_indices", [])
-        n_papers = len(paper_ids)
-        ids_str = ", ".join(paper_ids[:10])
-        if len(paper_ids) > 10:
-            ids_str += " ..."
+        keywords = tuple(concept.get("keywords", [])[:8])
 
-        section += f"""
-### Emergente {i}: {title}
-- **Palabras clave:** {keywords}
-- **Papers asociados ({n_papers}):** `{ids_str}`
-- **Descripción sintética:**  
-      {description}
+        title, description = self._generate(paper_ids, papers_text, fallback_title)
+        return EmergingTopic(
+            concept_id=concept_id,
+            title=title,
+            description=description,
+            keywords=keywords,
+            paper_ids=tuple(paper_ids),
+        )
 
+    def _generate(
+        self, paper_ids: List[str], papers_text: Dict, fallback_title: str
+    ) -> Tuple[str, str]:
+        if not paper_ids:
+            return fallback_title, "No hay papers asociados."
+
+        combined = self._build_text(paper_ids, papers_text)
+        if not combined.strip():
+            return fallback_title, "No hay texto suficiente para analizar."
+
+        raw = self._llm.generate_json(
+            prompt=(
+                f"Academic paper fragments from a discovered topic:\n\n{combined}\n\n"
+                'Return JSON: {"title": "...", "description": "..."}'
+            ),
+            system_prompt=self._SYSTEM_PROMPT,
+            temperature=self._cfg.llm_temperature,
+            max_tokens=self._cfg.emerging_max_tokens,
+            context=f"emerging:{fallback_title[:30]}",
+            expect_array=False,
+        )
+
+        title = re.sub(r"[*#]", "", raw.get("title", "")).strip()[:100] or fallback_title
+        description = re.sub(r"\s+", " ", raw.get("description", "")).strip()
+        return title, description or "No se pudo generar una descripción automática."
+
+    def _build_text(self, paper_ids: List[str], papers_text: Dict) -> str:
+        texts = []
+        for pid in paper_ids:
+            paper = papers_text.get(pid)
+            if not paper:
+                continue
+            parts = [
+                paper.get("title", ""),
+                paper.get("abstract", ""),
+                paper.get("clean_sections", {}).get("introduction", ""),
+                paper.get("clean_sections", {}).get("conclusion", ""),
+            ]
+            full = " ".join(p for p in parts if p)[:1500]
+            if full:
+                texts.append(full)
+        return "\n\n".join(texts)[: self._cfg.max_chars_per_emerging]
+
+
+# ---------------------------------------------------------------------------
+# Capa 2 – Constructor del modelo de datos (lógica de negocio pura)
+# ---------------------------------------------------------------------------
+
+class DocumentDataBuilder:
+    def __init__(
+        self,
+        config: TrainingConfig,
+        emerging_analyzer: EmergingTopicAnalyzer,
+    ) -> None:
+        self._cfg = config
+        self._analyzer = emerging_analyzer
+
+    def build(
+        self,
+        findings_data: List[Dict],
+        concepts_query: Dict,
+        aligned_concepts: Dict,
+        candidate_concepts: Dict,
+        concepts_with_tech: List[Dict],
+        papers_text: Dict,
+    ) -> DocumentModel:
+        aligned_lookup = {
+            str(ac.get("concept_id")): ac
+            for ac in aligned_concepts.get("aligned_concepts", [])
+        }
+        search_stats, emergent_ids = self._build_search_stats(
+            concepts_query, aligned_concepts, candidate_concepts
+        )
+
+        # Barra de progreso para construir tarjetas de concepto
+        concept_cards = []
+        for c_data in tqdm(findings_data, desc="Construyendo tarjetas de concepto"):
+            concept_cards.append(self._build_concept_card(c_data, aligned_lookup))
+        concept_cards = tuple(concept_cards)
+
+        emerging_topics = self._build_emerging_topics(
+            emergent_ids, candidate_concepts, papers_text
+        )
+        bibliography = self._build_bibliography(concept_cards)
+
+        return DocumentModel(
+            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            search_stats=search_stats,
+            concept_cards=concept_cards,
+            emerging_topics=emerging_topics,
+            technical_concepts=tuple(concepts_with_tech),
+            bibliography=bibliography,
+        )
+
+    def _build_search_stats(
+        self, concepts_query: Dict, aligned_concepts: Dict, candidate_concepts: Dict
+    ) -> Tuple[SearchStrategyStats, List[str]]:
+        aligned_ids = {
+            str(ac.get("concept_id"))
+            for ac in aligned_concepts.get("aligned_concepts", [])
+        }
+        candidate_list = candidate_concepts.get("concepts", [])
+        emergent_ids = [
+            str(c.get("concept_id"))
+            for c in candidate_list
+            if str(c.get("concept_id")) not in aligned_ids
+        ]
+        stats = SearchStrategyStats(
+            query_text=re.sub(r"\s+", " ", concepts_query.get("query", "")).strip(),
+            n_objective_concepts=len(concepts_query.get("concepts", [])),
+            n_candidates=candidate_concepts.get("n_topics", 0),
+            n_aligned=len(aligned_concepts.get("aligned_concepts", [])),
+            n_emergent=len(emergent_ids),
+            relevance_threshold=aligned_concepts.get(
+                "alignment_threshold", self._cfg.off_topic_threshold
+            ),
+            min_docs_after_rerank=str(
+                aligned_concepts.get("min_docs_after_rerank", "No especificado")
+            ),
+            focus_terms_used=bool(aligned_concepts.get("focus_terms_used", False)),
+        )
+        return stats, emergent_ids
+
+    def _build_concept_card(
+        self, concept_data: Dict, aligned_lookup: Dict
+    ) -> ConceptCard:
+        concept_id = str(concept_data["concept_id"])
+        threshold = self._cfg.min_display_similarity
+        min_score = self._cfg.min_finding_score
+        aligned = aligned_lookup.get(concept_id, {})
+
+        def make_evidence(ev: Dict) -> EvidenceItem:
+            return EvidenceItem(
+                doc_id=ev["doc_id"],
+                paper_title=ev.get("paper_title", ""),
+                text=re.sub(r"\s+", " ", ev.get("text", "")).strip(),
+                similarity=ev["similarity"],
+                structured_evidence=ev.get("structured_evidence", {}),
+            )
+
+        valid_evidences = tuple(
+            make_evidence(ev)
+            for ev in concept_data.get("all_evidences", [])
+            if ev.get("similarity", 0) >= threshold
+        )
+
+        findings: List[FindingItem] = []
+        for f in concept_data.get("findings", []):
+            if f.get("avg_evidence_score", 0.0) < min_score:
+                writeLog(
+                    "debug",
+                    logger,
+                    f"[Builder] Finding dropped (low score: {f.get('avg_evidence_score', 0):.2f} < {min_score})",
+                )
+                continue
+            quotes = tuple(
+                make_evidence(q)
+                for q in f.get("top_quotes", [])
+                if q.get("similarity", 0) >= threshold
+            )
+            if quotes:
+                findings.append(
+                    FindingItem(
+                        finding_text=f.get("finding", ""),
+                        evidence_count=f.get("evidence_count", 0),
+                        avg_evidence_score=f.get("avg_evidence_score", 0.0),
+                        top_quotes=quotes,
+                    )
+                )
+
+        paper_ids: Dict[str, str] = {ev.doc_id: ev.paper_title for ev in valid_evidences}
+        for fi in findings:
+            for q in fi.top_quotes:
+                paper_ids[q.doc_id] = q.paper_title
+
+        concept_type = aligned.get("concept_type")
+        return ConceptCard(
+            concept_id=concept_id,
+            concept_query=concept_data.get("concept_query", ""),
+            concept_type=concept_type if concept_type and concept_type != "default" else None,
+            focus_density=aligned.get("focus_density"),
+            findings=tuple(findings),
+            all_evidences=valid_evidences,
+            represented_papers=tuple(paper_ids.keys()),
+            represented_titles=paper_ids,
+        )
+
+    def _build_emerging_topics(
+        self, emergent_ids: List[str], candidate_concepts: Dict, papers_text: Dict
+    ) -> Tuple[EmergingTopic, ...]:
+        id_set = set(emergent_ids)
+        emergent_concepts = [
+            c for c in candidate_concepts.get("concepts", [])
+            if str(c.get("concept_id")) in id_set
+        ]
+        # Barra de progreso para generación de tópicos emergentes (LLM)
+        topics = []
+        for concept in tqdm(emergent_concepts, desc="Generando tópicos emergentes"):
+            topics.append(self._analyzer.analyze(concept, papers_text))
+        return tuple(topics)
+
+    @staticmethod
+    def _build_bibliography(cards: Tuple[ConceptCard, ...]) -> Dict[str, str]:
+        bibliography: Dict[str, str] = {}
+        for card in cards:
+            bibliography.update(card.represented_titles)
+        return bibliography
+
+
+# ---------------------------------------------------------------------------
+# Capa 3 – Renderer Markdown (presentación pura)
+# ---------------------------------------------------------------------------
+
+class MarkdownRenderer:
     """
-    return section
+    Convierte DocumentModel → string Markdown.
+    No filtra datos, no llama al LLM, no lee disco.
+    """
 
+    _STRENGTH_MAP = (
+        (5, 0.70, "Muy Alta", "🔴"),
+        (3, 0.65, "Alta",     "🟠"),
+        (2, 0.60, "Media",    "🟡"),
+        (1, 0.00, "Baja",     "🟢"),
+    )
 
-# --------------------------------------------------
-# ANEXO TÉCNICO
-# --------------------------------------------------
+    def __init__(self, config: TrainingConfig, translation_svc: TranslationService) -> None:
+        self._cfg = config
+        self._translation_svc = translation_svc
 
-def generate_technical_annex_markdown(concepts_with_tech: list) -> str:
-    if not concepts_with_tech:
-        return "## Anexo Técnico: Metodologías y Experimentación\n\nNo se encontraron datos técnicos para los conceptos alineados.\n"
+    def render(self, model: DocumentModel) -> str:
+        return "\n".join(
+            [
+                self._render_header(model),
+                self._render_search_stats(model.search_stats),
+                "---\n",
+                self._render_concept_summary(model.concept_cards),
+                "---\n",
+                self._render_concept_cards(model.concept_cards),
+                self._render_emerging_topics(model.emerging_topics),
+                "---\n",
+                self._render_technical_annex(model.technical_concepts),
+                "---\n",
+                self._render_bibliography(model.bibliography),
+                self._render_footer(),
+            ]
+        )
 
-    sections = []
-    sections.append("\n---\n\n## Anexo Técnico: Metodologías y Experimentación\n")
-    sections.append(
-        "A continuación se detallan los aspectos metodológicos y de experimentación extraídos de los papers asociados a cada concepto alineado.\n\n")
+    def _render_header(self, model: DocumentModel) -> str:
+        return (
+            "# Scientific Literature Intelligence Pipeline (SLIP)\n\n"
+            f"**Generado:** {model.generated_at}\n\n---\n"
+        )
 
-    for concept in concepts_with_tech:
-        concept_id = concept.get("concept_id")
-        concept_name = concept.get("concept_name", "")
-        papers = concept.get("papers", [])
+    def _render_search_stats(self, stats: SearchStrategyStats) -> str:
+        return (
+            "## Evaluación de la estrategia de búsqueda\n\n"
+            f"### Query utilizada\n{stats.query_text}\n\n"
+            "### Estadísticas\n"
+            f"- **Conceptos objetivo:** {stats.n_objective_concepts}\n"
+            f"- **Tópicos descubiertos:** {stats.n_candidates}\n"
+            f"- **Tópicos alineados:** {stats.n_aligned}\n"
+            f"- **Tópicos emergentes:** {stats.n_emergent}\n"
+            f"- **Umbral de relevancia:** {stats.relevance_threshold}\n"
+            f"- **Mín. docs por concepto:** {stats.min_docs_after_rerank}\n"
+            f"- **Focus terms:** {'Sí' if stats.focus_terms_used else 'No'}\n"
+        )
 
-        if not papers:
-            continue
+    def _render_concept_summary(self, cards: Tuple[ConceptCard, ...]) -> str:
+        lines = ["## Resumen de hallazgos por concepto objetivo\n"]
 
-        sections.append(f"\n---\n### Concepto {concept_id}: {concept_name}\n\n")
-        sections.append(
-            "| ID | Dispositivos Sensores | Modalidades | Extracción de Características | Modelos ML/DL | Rendimiento | Limitaciones |")
-        sections.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for card in cards:
+            lines.append(f"**Concepto {card.concept_id}:** {card.concept_query}\n")
 
-        for paper in papers[:10]:
-            paper_id = paper.get("paper_id", "Unknown")
-            profile = paper.get("profile", {})
+            if not card.findings:
+                lines.append("*Sin hallazgos sintetizados*\n")
+                continue
 
-            def join_field(field):
-                if isinstance(field, list):
-                    return ", ".join(field) or "—"
-                elif isinstance(field, str):
-                    return field or "—"
+            for idx, finding in enumerate(card.findings, 1):
+                # Traducir el texto del hallazgo
+                finding_text = self._translation_svc.translate(finding.finding_text)
+                lines.append(f"**Hallazgo {idx}:**")
+                lines.append(f"> {finding_text}\n")
+
+                paper_ids = sorted(set(q.doc_id for q in finding.top_quotes))
+                if paper_ids:
+                    lines.append(f"**Papers:** {', '.join(paper_ids)}\n")
                 else:
-                    return "—"
+                    lines.append("**Papers:** Sin papers asociados directamente\n")
 
-            devices = join_field(profile.get("sensor_devices"))
-            modalities = join_field(profile.get("sensor_modalities"))
-            features = join_field(profile.get("feature_extraction_methods"))
-            models = join_field(profile.get("machine_learning_models"))
+        return "\n".join(lines)
 
-            perf_raw = profile.get("performance_metrics")
-            if perf_raw is None:
-                performance = "—"
-            elif isinstance(perf_raw, list):
-                performance = ", ".join(perf_raw) or "—"
+    def _render_concept_cards(self, cards: Tuple[ConceptCard, ...]) -> str:
+        return "\n---\n".join(self._render_concept_card(c) for c in cards) + "\n---\n"
+
+    def _render_concept_card(self, card: ConceptCard) -> str:
+        header = f"## Concepto {card.concept_id}: {card.concept_query}\n"
+
+        meta = []
+        if card.concept_type:
+            meta.append(f"Tipo: `{card.concept_type}`")
+        if card.focus_density is not None:
+            meta.append(f"Densidad de foco: {card.focus_density * 100:.0f}%")
+        if meta:
+            header += f"*{' · '.join(meta)}*\n"
+
+        if card.represented_papers:
+            ids = ", ".join(list(card.represented_papers)[:15])
+            if len(card.represented_papers) > 15:
+                ids += f" ... y {len(card.represented_papers) - 15} más"
+            header += f"\n**Papers representados:** {len(card.represented_papers)}: `{ids}`\n"
+
+        if not card.findings:
+            if card.all_evidences:
+                return (
+                    header
+                    + "\n### Estado: SIN HALLAZGOS SINTETIZADOS\n\n"
+                    + "Se encontraron fragmentos relevantes sin hallazgos consolidados.\n\n"
+                    + "**Evidencias textuales:**\n\n"
+                    + self._render_evidence_blocks(card.all_evidences)
+                )
+            return header + "\n### Estado: SIN EVIDENCIA SUFICIENTE\n"
+
+        parts = [header]
+        for idx, finding in enumerate(card.findings, 1):
+            strength, emoji = self._evidence_strength(
+                finding.avg_evidence_score, finding.evidence_count
+            )
+            # Traducir el texto del hallazgo
+            finding_text = self._translation_svc.translate(finding.finding_text)
+            parts.append(
+                f"\n### Hallazgo {idx}: {emoji} {strength}\n\n"
+                f"> {finding_text}\n\n"
+                "**Evidencias textuales:**\n\n"
+                + self._render_evidence_blocks(finding.top_quotes)
+            )
+        return "\n".join(parts)
+
+    def _render_evidence_blocks(self, evidences: Tuple[EvidenceItem, ...]) -> str:
+        shown = evidences[: self._cfg.max_evidences_to_show]
+        if not shown:
+            return f"No hay evidencias con similitud ≥ {self._cfg.min_display_similarity}.\n"
+
+        blocks = []
+        for ev in shown:
+            # Traducir las secciones estructuradas (ideas, métodos, resultados, aplicaciones)
+            structured_md = self._render_structured(ev.structured_evidence)
+            # La cita textual NO se traduce
+            text = ev.text  # se mantiene en inglés
+            # El título del paper NO se traduce
+            if ev.paper_title and ev.paper_title != "Unknown":
+                title = ev.paper_title
             else:
-                performance = str(perf_raw) or "—"
+                title = f"ID: {ev.doc_id}"
 
-            lim_raw = profile.get("limitations")
-            if lim_raw is None:
-                limitations = "—"
-            elif isinstance(lim_raw, list):
-                limitations = ", ".join(lim_raw) or "—"
-            else:
-                limitations = str(lim_raw) or "—"
+            blocks.append(
+                f"- **{title}** "
+                f"(sim: {ev.similarity:.3f}) (ID: `{ev.doc_id}`)\n"
+                f'  *"{text}"*\n'
+                + (f"\n{structured_md}\n" if structured_md else "")
+            )
+        return "\n".join(blocks)
 
-            devices = devices.replace("|", "\\|")
-            modalities = modalities.replace("|", "\\|")
-            features = features.replace("|", "\\|")
-            models = models.replace("|", "\\|")
-            performance = performance.replace("|", "\\|")
-            limitations = limitations.replace("|", "\\|")
+    def _render_structured(self, structured: Dict) -> str:
+        """
+        Renderiza y traduce las secciones estructuradas (ideas, métodos, resultados, aplicaciones).
+        """
+        if not structured:
+            return ""
+        parts = []
+        for key, label in (
+            ("ideas", "Ideas principales"),
+            ("metodos", "Métodos"),
+            ("resultados", "Resultados"),
+            ("aplicaciones", "Aplicaciones"),
+        ):
+            val = structured.get(key, "")
+            if val:
+                # Traducir el contenido de la sección
+                translated_val = self._translation_svc.translate(val)
+                parts.append(f"  **{label}:** {translated_val}")
+        return "\n".join(parts)
 
-            sections.append(
-                f"| `{paper_id}` | {devices} | {modalities} | {features} | {models} | {performance} | {limitations} |")
+    def _render_emerging_topics(self, topics: Tuple[EmergingTopic, ...]) -> str:
+        header = "## Conceptos emergentes (no alineados)\n\n"
+        if not topics:
+            return header + "No se detectaron conceptos emergentes.\n"
+        header += (
+            "Tópicos descubiertos automáticamente que no superaron el umbral "
+            "de alineamiento.\n\n"
+        )
+        parts = [header]
+        for i, topic in enumerate(topics, 1):
+            ids_str = ", ".join(topic.paper_ids[:10])
+            if len(topic.paper_ids) > 10:
+                ids_str += " ..."
+            parts.append(
+                f"### Emergente {i}: {topic.title}\n"
+                f"- **Palabras clave:** {', '.join(topic.keywords)}\n"
+                f"- **Papers ({len(topic.paper_ids)}):** `{ids_str}`\n"
+                f"- **Descripción:** {topic.description}\n"
+            )
+        return "\n".join(parts) + "\n---\n"
 
-        sections.append("\n")
+    def _render_technical_annex(self, concepts: Tuple[Dict, ...]) -> str:
+        header = "## Anexo Técnico: Metodologías y Experimentación\n\n"
+        if not concepts:
+            return header + "No se encontraron datos técnicos.\n"
+        lines = [header]
+        for concept in concepts:
+            papers = concept.get("papers", [])
+            if not papers:
+                continue
+            lines.append(
+                f"### Concepto {concept.get('concept_id')}: "
+                f"{concept.get('concept_name', '')}\n"
+            )
+            lines.append(
+                "| ID | Dispositivos | Modalidades | Características "
+                "| Modelos ML/DL | Rendimiento | Limitaciones |"
+            )
+            lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+            for paper in papers[:10]:
+                lines.append(self._render_tech_row(paper))
+            lines.append("")
+        return "\n".join(lines)
 
-    return "\n".join(sections)
+    @staticmethod
+    def _render_tech_row(paper: Dict) -> str:
+        profile = paper.get("profile", {})
 
+        def fmt(val) -> str:
+            if isinstance(val, list):
+                return (", ".join(val) or "—").replace("|", "\\|")
+            return (str(val) if val else "—").replace("|", "\\|")
 
-# --------------------------------------------------
-# DOCUMENTO FINAL
-# --------------------------------------------------
+        return (
+            f"| `{paper.get('paper_id', '?')}` "
+            f"| {fmt(profile.get('sensor_devices'))} "
+            f"| {fmt(profile.get('sensor_modalities'))} "
+            f"| {fmt(profile.get('feature_extraction_methods'))} "
+            f"| {fmt(profile.get('machine_learning_models'))} "
+            f"| {fmt(profile.get('performance_metrics'))} "
+            f"| {fmt(profile.get('limitations'))} |"
+        )
 
-def generate_training_document(
-        findings_data: list,
-        concepts_query: dict,
-        aligned_concepts: dict,
-        candidate_concepts: dict,
-        concepts_with_tech: list,
-        papers_text: dict
-) -> str:
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    search_eval, emergent_ids = evaluate_search_strategy(concepts_query, aligned_concepts, candidate_concepts)
+    def _render_bibliography(self, bibliography: Dict[str, str]) -> str:
+        header = "## Bibliografía completa\n\n"
+        if not bibliography:
+            return header + "No se encontraron evidencias con similitud suficiente.\n"
+        entries = sorted(bibliography.items(), key=lambda x: x[1].lower())
+        # Los títulos NO se traducen
+        lines = [f"- **{title}**  \n  (ID: `{doc_id}`)\n" for doc_id, title in entries]
+        return header + "\n".join(lines)
 
-    # NEW: lookup for concept_type / focus_density, built once and
-    # passed to generate_training_card so this metadata reaches the
-    # final document instead of being discarded after alignment/clustering.
-    aligned_lookup = {
-        ac.get("concept_id"): ac
-        for ac in aligned_concepts.get("aligned_concepts", [])
-    }
+    @staticmethod
+    def _render_footer() -> str:
+        return (
+            "\n*Documento generado automáticamente por SLIP. "
+            "Títulos en idioma original; fragmentos y resúmenes traducidos al español.*\n"
+        )
 
-    doc = f"""# Scientific Literature Intelligence Pipeline (SLIP)
-
-**Generado:** {timestamp}\n
-
----
-
-{search_eval}
-
----
-
-## Resumen de hallazgos por concepto objetivo
-"""
-    for concept in findings_data:
-        concept_id = concept["concept_id"]
-        q_short = concept["concept_query"]
-        n_f = concept.get("n_findings", 0)
-        papers_count = len(concept.get("all_papers", []))
-        findings_list = concept.get("findings", [])
-        if findings_list:
-            first_finding_text = findings_list[0].get("finding", "")
-            first_finding = first_finding_text[:150] + "..." if len(first_finding_text) > 150 else first_finding_text
-        else:
-            first_finding = "Sin hallazgos sintetizados"
-        doc += f"""
-**Concepto {concept_id}:** {q_short}\n
-- Hallazgos: {n_f} | Papers representados: {papers_count}
-- Resumen: {first_finding}
-"""
-
-    doc += "\n---\n"
-
-    for concept in findings_data:
-        doc += generate_training_card(concept, aligned_lookup)
-        doc += "\n---\n"
-
-    doc += generate_emerging_section(emergent_ids, candidate_concepts, papers_text)
-    doc += "\n---\n"
-
-    doc += generate_technical_annex_markdown(concepts_with_tech)
-    doc += "\n---\n"
-
-    doc += "\n## Bibliografía completa de los hallazgos principales\n"
-    all_papers = {}
-    for concept in findings_data:
-        for ev in concept.get("all_evidences", []):
-            if ev.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY:
-                all_papers[ev["doc_id"]] = ev["paper_title"]
-        for finding in concept.get("findings", []):
-            for quote in finding.get("top_quotes", []):
-                if quote.get("similarity", 0) >= MIN_DISPLAY_SIMILARITY:
-                    all_papers[quote["doc_id"]] = quote["paper_title"]
-    if all_papers:
-        for doc_id, title in sorted(all_papers.items(), key=lambda x: x[1].lower()):
-            doc += f"- **{title}**  \n  (ID: `{doc_id}`)\n\n"
-    else:
-        doc += "No se encontraron evidencias con similitud suficiente.\n"
-
-    doc += "\n*Documento generado automáticamente por SLIP. Los títulos de los papers se mantienen en su idioma original; los fragmentos de evidencia y los resúmenes están traducidos al español.*\n"
-    return doc
+    def _evidence_strength(self, avg_score: float, count: int) -> Tuple[str, str]:
+        for min_count, min_score, label, emoji in self._STRENGTH_MAP:
+            if count >= min_count and avg_score >= min_score:
+                return label, emoji
+        return "Sin evidencia", "⚪"
 
 
-# --------------------------------------------------
-# ENTRY POINT
-# --------------------------------------------------
+# ---------------------------------------------------------------------------
+# Capa 4 – Orquestador
+# ---------------------------------------------------------------------------
 
-def processTrainingMaterials():
-    global _translation_cache
+class TrainingMaterialsPipeline:
+    """Builder → modelo de datos → Renderer → Markdown."""
 
+    def __init__(
+        self,
+        builder: DocumentDataBuilder,
+        renderer: MarkdownRenderer,
+        translation_svc: TranslationService,
+    ) -> None:
+        self._builder = builder
+        self._renderer = renderer
+        self._translation_svc = translation_svc
+
+    def run(
+        self,
+        findings_data: List[Dict],
+        concepts_query: Dict,
+        aligned_concepts: Dict,
+        candidate_concepts: Dict,
+        concepts_with_tech: List[Dict],
+        papers_text: Dict,
+        output_file: Optional[Path] = None,
+        cache_dir: Optional[Path] = None,
+    ) -> str:
+        model = self._builder.build(
+            findings_data=findings_data,
+            concepts_query=concepts_query,
+            aligned_concepts=aligned_concepts,
+            candidate_concepts=candidate_concepts,
+            concepts_with_tech=concepts_with_tech,
+            papers_text=papers_text,
+        )
+        if cache_dir:
+            self._translation_svc.save_cache()
+
+        markdown = self._renderer.render(model)
+
+        if output_file:
+            output_file.write_text(markdown, encoding="utf-8")
+            writeLog("info", logger, f"[TrainingMaterials] Saved to {output_file}")
+
+        return markdown
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+def build_pipeline(
+    config: TrainingConfig,
+    translation_svc: TranslationService,
+    llm_client: Optional[LLMClient] = None,
+) -> TrainingMaterialsPipeline:
+    client = llm_client or create_ollama_client(
+        model=config.llm_model,
+        max_retries=2,
+        temperature=config.llm_temperature,
+        max_tokens=config.llm_max_tokens,
+    )
+    emerging_analyzer = EmergingTopicAnalyzer(llm_client=client, config=config)
+    builder = DocumentDataBuilder(config=config, emerging_analyzer=emerging_analyzer)
+    renderer = MarkdownRenderer(config=config, translation_svc=translation_svc)
+    pipeline = TrainingMaterialsPipeline(
+        builder=builder, renderer=renderer, translation_svc=translation_svc
+    )
+    return pipeline
+
+
+# ---------------------------------------------------------------------------
+# Helpers de I/O
+# ---------------------------------------------------------------------------
+
+def _load_optional(path: Path, default):
+    if not path.exists():
+        return default
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+# ---------------------------------------------------------------------------
+# Punto de entrada
+# ---------------------------------------------------------------------------
+
+def processTrainingMaterials() -> Optional[str]:
     input_dir, output_dir = inicioModulo("processTrainingMaterials")
 
     findings_file = output_dir / "concept_findings.json"
-    candidate_file = output_dir / "candidate_concepts.json"
-    aligned_file = output_dir / "aligned_concepts.json"
-    query_file = input_dir / "conceptsQuery.json"
-    technical_file = output_dir / "technical_annex.json"
-    papers_file = output_dir / "papers_text.json"
-
     if not findings_file.exists():
-        writeLog("error", logger, f"[Training] No se encuentra {findings_file}")
-        return
-    findings_data = load_json(findings_file)
+        writeLog("error", logger, f"[TrainingMaterials] {findings_file} not found")
+        return None
 
-    candidate_concepts = load_json(candidate_file) if candidate_file.exists() else {"concepts": [], "n_topics": 0}
-    aligned_concepts = load_json(aligned_file) if aligned_file.exists() else {
-        "aligned_concepts": [], "alignment_threshold": OFF_TOPIC_THRESHOLD
-    }
-    concepts_query = load_json(query_file) if query_file.exists() else {"query": "", "concepts": []}
-    concepts_with_tech = load_json(technical_file).get("concepts", []) if technical_file.exists() else []
-
-    papers_text = {}
-    if candidate_concepts.get("concepts") and papers_file.exists():
-        papers_data = load_json(papers_file)
-        papers_text = {p["paper_id"]: p for p in papers_data if "paper_id" in p}
-
-    # NEW: load disk-persisted translation cache before generating the doc
-    _translation_cache = _load_translation_cache(output_dir)
-    writeLog("info", logger, f"[Training] Loaded {len(_translation_cache)} cached translations")
-
-    doc = generate_training_document(
-        findings_data,
-        concepts_query,
-        aligned_concepts,
-        candidate_concepts,
-        concepts_with_tech,
-        papers_text
+    findings_data = _load_optional(findings_file, [])
+    candidate = _load_optional(
+        output_dir / "candidate_concepts.json",
+        {"concepts": [], "n_topics": 0},
     )
+    aligned = _load_optional(
+        output_dir / "aligned_concepts.json",
+        {"aligned_concepts": [], "alignment_threshold": 0.30},
+    )
+    concepts_query = _load_optional(input_dir / "conceptsQuery.json", {"query": "", "concepts": []})
+    tech_data = _load_optional(output_dir / "technical_annex.json", {})
+    concepts_with_tech = tech_data.get("concepts", []) if tech_data else []
 
-    output_file = output_dir / "training_materials.md"
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write(doc)
+    papers_text: Dict = {}
+    papers_file = output_dir / "papers_text.json"
+    if candidate.get("concepts") and papers_file.exists():
+        raw = _load_optional(papers_file, [])
+        papers_text = {p["paper_id"]: p for p in raw if "paper_id" in p}
 
-    # NEW: persist translation cache for future runs
-    _save_translation_cache(output_dir, _translation_cache)
-    writeLog("info", logger, f"[Training] Saved {len(_translation_cache)} translations to cache")
+    config = TrainingConfig.from_file(input_dir / "studyDescription.json")
 
-    writeLog("info", logger, f"[Training] Material guardado en {output_file}")
+    # Instanciar servicio de traducción (caché en disco)
+    cache_file = output_dir / config.translation_cache_file
+    translation_svc = TranslationService(cache_file=cache_file)
+    translation_svc.load_cache()
+
+    pipeline = build_pipeline(config, translation_svc)
+
+    return pipeline.run(
+        findings_data=findings_data,
+        concepts_query=concepts_query,
+        aligned_concepts=aligned,
+        candidate_concepts=candidate,
+        concepts_with_tech=concepts_with_tech,
+        papers_text=papers_text,
+        output_file=output_dir / "training_materials.md",
+        cache_dir=output_dir,
+    )
 
 
 if __name__ == "__main__":

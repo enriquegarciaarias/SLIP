@@ -1,3 +1,4 @@
+#fullTextExtractionEngine.py
 from sources.common.common import logger, processControl, writeLog
 from sources.common.utils import inicioModulo
 

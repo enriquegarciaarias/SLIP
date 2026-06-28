@@ -1,7 +1,7 @@
 # enrichmentEngine.py
-from sources.common.common import logger, processControl, writeLog
-from sources.pdf_resolver import resolve_pdf_url
-from sources.common.utils import inicioModulo
+from sources.common.common import logger, writeLog
+from sources.common.pdf_resolver import resolve_pdf_url
+from sources.common.utils import inicioModulo, read_json
 
 import json
 import time
@@ -346,60 +346,57 @@ def save_selected(selected: list, output_dir: Path) -> Path:
 # ENTRY POINT
 # --------------------------------------------------
 def processEnrichmentEngine():
-    input_dir, output_dir = inicioModulo("processEnrichmentEngine")
-    ranked_file = output_dir / "ranked_papers.json"
+    try:
+        input_dir, output_dir = inicioModulo("processEnrichmentEngine")
+        ranked_papers = read_json(output_dir / "ranked_papers.json")
 
-    if not ranked_file.exists():
-        writeLog("error", logger, f"Not found: {ranked_file}")
-        return None
+        # Filtrar papers con título o abstract None
+        valid_papers = []
+        for p in ranked_papers:
+            if p.get('title') is None:
+                writeLog("warning", logger, f"[Enrichment] Skipping paper with None title: {p.get('paper_id', 'unknown')}")
+                continue
+            if p.get('abstract') is None:
+                writeLog("warning", logger,
+                         f"[Enrichment] Skipping paper with None abstract: {p.get('paper_id', 'unknown')} - {p.get('title', '')[:50]}")
+                continue
+            valid_papers.append(p)
 
-    with open(ranked_file, "r", encoding="utf-8") as f:
-        ranked_papers = json.load(f)
+        if len(valid_papers) < len(ranked_papers):
+            writeLog("info", logger,
+                     f"[Enrichment] Filtered out {len(ranked_papers) - len(valid_papers)} papers with missing title/abstract")
 
-    # Filtrar papers con título o abstract None
-    valid_papers = []
-    for p in ranked_papers:
-        if p.get('title') is None:
-            writeLog("warning", logger, f"[Enrichment] Skipping paper with None title: {p.get('paper_id', 'unknown')}")
-            continue
-        if p.get('abstract') is None:
-            writeLog("warning", logger,
-                     f"[Enrichment] Skipping paper with None abstract: {p.get('paper_id', 'unknown')} - {p.get('title', '')[:50]}")
-            continue
-        valid_papers.append(p)
+        writeLog("info", logger, f"[Enrichment] Loaded {len(valid_papers)} valid papers from ranked_papers.json")
 
-    if len(valid_papers) < len(ranked_papers):
-        writeLog("info", logger,
-                 f"[Enrichment] Filtered out {len(ranked_papers) - len(valid_papers)} papers with missing title/abstract")
+        # 1. Enrich
+        enriched = enrichment_engine(valid_papers)
 
-    writeLog("info", logger, f"[Enrichment] Loaded {len(valid_papers)} valid papers from ranked_papers.json")
+        # 2. Build review
+        review = build_candidate_review(enriched)
 
-    # 1. Enrich
-    enriched = enrichment_engine(valid_papers)
+        # 3. Generar PDFs para revisión
+        original_review, spanish_review = build_dual_review(review)
+        generate_review_pdf(original_review, output_dir / "review_original.pdf", top_k=100)
+        generate_review_pdf(spanish_review, output_dir / "review_es.pdf", top_k=100)
 
-    # 2. Build review
-    review = build_candidate_review(enriched)
+        # 4. Interactive selection
+        selected, rejected = interactive_selection(review, output_dir)
 
-    # 3. Generar PDFs para revisión
-    original_review, spanish_review = build_dual_review(review)
-    generate_review_pdf(original_review, output_dir / "review_original.pdf", top_k=100)
-    generate_review_pdf(spanish_review, output_dir / "review_es.pdf", top_k=100)
+        # 5. Guardar selected_papers.json
+        selected_file = save_selected(selected, output_dir)
 
-    # 4. Interactive selection
-    selected, rejected = interactive_selection(review, output_dir)
+        writeLog("info", logger, f"[Enrichment] Selected: {len(selected)} papers")
+        writeLog("info", logger, f"[Enrichment] Rejected: {len(rejected)} papers")
+        writeLog("info", logger, f"[Enrichment] Saved to {selected_file}")
+        writeLog("info", logger, "✅ [END] processEnrichmentEngine")
 
-    # 5. Guardar selected_papers.json
-    selected_file = save_selected(selected, output_dir)
-
-    writeLog("info", logger, f"[Enrichment] Selected: {len(selected)} papers")
-    writeLog("info", logger, f"[Enrichment] Rejected: {len(rejected)} papers")
-    writeLog("info", logger, f"[Enrichment] Saved to {selected_file}")
-    writeLog("info", logger, "✅ [END] processEnrichmentEngine")
-
-    return {
-        "selected": str(selected_file),
-        "total_selected": len(selected),
-    }
+        return {
+            "selected": str(selected_file),
+            "total_selected": len(selected),
+        }
+    except Exception as e:
+        writeLog("error", logger, f"Error in processEnrichmentEngine: {e}")
+        raise RuntimeError(f"Error processEnrichmentEngine: {e}") from e
 
 
 if __name__ == "__main__":

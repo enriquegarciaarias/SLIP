@@ -24,18 +24,20 @@ from sklearn.cluster import KMeans
 # --------------------------------------------------
 try:
     import spacy
+
     nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
-    # 🔥 FIX: Aumentar el límite de caracteres para evitar errores con textos largos
-    nlp.max_length = 2_000_000  # 2 millones de caracteres
+    nlp.max_length = 2_000_000
 except OSError:
     import subprocess
+
     writeLog("info", logger, "[Discovery] spaCy model not found. Downloading en_core_web_sm...")
     subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
     import spacy
+
     nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
     nlp.max_length = 2_000_000
 except ImportError:
-    writeLog("error", logger, "[Discovery] spaCy not installed. Please `pip install spacy` and download model.")
+    writeLog("error", logger, "[Discovery] spaCy not installed.")
     raise
 
 # --------------------------------------------------
@@ -43,25 +45,18 @@ except ImportError:
 # --------------------------------------------------
 
 EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
-
-# Minimum cosine similarity between a discovered topic and the
-# studyDescription embedding for the topic to be kept.
 OFF_TOPIC_THRESHOLD = 0.30
-
-# How many seed terms from studyDescription to prepend to each paper.
 N_SEED_TERMS = 30
-
-# Sections to consider (ordered by importance)
 RELEVANT_SECTIONS = ["abstract", "introduction", "methodology", "results", "conclusion"]
 
 # UMAP / HDBSCAN
 UMAP_COMPONENTS = 8
 MIN_CLUSTER_SIZE = 3
+MAX_TEXT_LENGTH = 500_000
 
-# 🔥 Nuevo: límite máximo de caracteres para el tokenizador de spaCy
-MAX_TEXT_LENGTH = 500_000  # 500k caracteres (suficiente para la mayoría de papers)
+# NUEVO: Número de papers a pre-seleccionar por cada RQ
+TOP_K_PAPERS_PER_RQ = 40
 
-# Extra stopwords (including numbers, months, academic boilerplate)
 EXTRA_STOPWORDS = {
     "december", "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november",
@@ -77,240 +72,117 @@ ALL_STOPWORDS = DEFAULT_STOPS.union(EXTRA_STOPWORDS)
 
 
 # --------------------------------------------------
-# CUSTOM VECTORIZER WITH SPACY + POS FILTERING + N-GRAMS
+# CUSTOM VECTORIZER (Sin cambios, es perfecto)
 # --------------------------------------------------
-
 class POSFilterVectorizer(CountVectorizer):
-    """
-    Tokenizes with spaCy, keeps only NOUN, ADJ, PROPN, lemmatizes,
-    removes stopwords, numbers, short tokens. Generates unigrams + bigrams.
-    """
     def __init__(self, nlp_model, ngram_range=(1, 2), min_df=2, max_df=0.85, max_features=5000, **kwargs):
-        super().__init__(
-            ngram_range=ngram_range,
-            min_df=min_df,
-            max_df=max_df,
-            max_features=max_features,
-            **kwargs
-        )
+        super().__init__(ngram_range=ngram_range, min_df=min_df, max_df=max_df, max_features=max_features, **kwargs)
         self.nlp_model = nlp_model
 
     def build_tokenizer(self):
         def tokenize(text):
-            # 🔥 FIX: truncar texto si excede el límite para evitar error en spaCy
-            if len(text) > MAX_TEXT_LENGTH:
-                text = text[:MAX_TEXT_LENGTH]
+            if len(text) > MAX_TEXT_LENGTH: text = text[:MAX_TEXT_LENGTH]
             doc = self.nlp_model(text)
             tokens = []
             for token in doc:
                 if token.pos_ in ("NOUN", "ADJ", "PROPN"):
-                    if (not token.is_stop and
-                        not token.like_num and
-                        len(token.text) > 2 and
-                        not any(c.isdigit() for c in token.text)):
+                    if (not token.is_stop and not token.like_num and len(token.text) > 2 and not any(
+                            c.isdigit() for c in token.text)):
                         lemma = token.lemma_.lower()
-                        if lemma not in EXTRA_STOPWORDS and len(lemma) > 2:
-                            tokens.append(lemma)
+                        if lemma not in EXTRA_STOPWORDS and len(lemma) > 2: tokens.append(lemma)
             return tokens
+
         return tokenize
 
 
 def create_custom_vectorizer() -> CountVectorizer:
-    return POSFilterVectorizer(
-        nlp_model=nlp,
-        ngram_range=(1, 2),
-        min_df=2,
-        max_df=0.85,
-        max_features=5000
-    )
+    return POSFilterVectorizer(nlp_model=nlp, ngram_range=(1, 2), min_df=2, max_df=0.85, max_features=5000)
 
 
 # --------------------------------------------------
-# ORIENTATION — read study context from JSON
+# ORIENTATION (Sin cambios lógicos, solo carga conceptsQuery)
 # --------------------------------------------------
-
 def load_study_context(input_dir: Path) -> tuple[str, dict, list[str]]:
-    """
-    Lee studyDescription.json del directorio input_dir.
-    Devuelve (study_text, concepts_query, focus_terms).
-    """
     json_file = input_dir / "studyDescription.json"
-
-    study_text = ""
-    focus_terms = []
-    concepts_query = {}
-
-    # Intentar JSON primero
+    study_text, focus_terms, concepts_query = "", [], {}
     if json_file.exists():
         try:
             with open(json_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             project = data.get("project", {})
-            objectives = project.get("objectives", [])
-            study_text = " ".join(objectives) if objectives else ""
-            keywords = project.get("keywords", [])
+            study_text = " ".join(project.get("objectives", []))
             focus_terms = project.get("focus_terms", [])
-            # concepts_query se cargará después (es un archivo separado)
-            writeLog("info", logger, f"[Discovery] Loaded studyDescription.json: {len(objectives)} objectives, {len(focus_terms)} focus terms")
+            writeLog("info", logger,
+                     f"[Discovery] Loaded studyDescription.json: {len(project.get('objectives', []))} objectives")
         except Exception as e:
             writeLog("error", logger, f"[Discovery] Error reading studyDescription.json: {e}")
 
-    else:
-        writeLog("info", logger,
-                 f"[Discovery] No studyDescription.json or .txt found in {input_dir} — running without domain orientation")
-
-    # Cargar conceptsQuery.json (si existe)
     query_file = input_dir / "conceptsQuery.json"
     if query_file.exists():
-        with open(query_file, "r", encoding="utf-8") as f:
-            concepts_query = json.load(f)
-    else:
-        writeLog("info", logger,
-                 f"[Discovery] conceptsQuery.json not found — "
-                 f"seed_topic_list will be empty")
-
+        with open(query_file, "r", encoding="utf-8") as f: concepts_query = json.load(f)
     return study_text, concepts_query, focus_terms
 
 
-# --------------------------------------------------
-# SEED TERMS + SEED TOPIC LIST
-# --------------------------------------------------
-
-def extract_study_seeds(
-    study_text:     str,
-    concepts_query: dict,
-    focus_terms:    list[str],
-) -> tuple[list[str], list[list[str]]]:
-    """
-    Construye seed_terms (con peso a focus_terms) y seed_topic_list
-    a partir de concepts_query.
-    """
-    generic_terms = {
-        "natural", "language", "processing", "model", "system",
-        "using", "based", "approach", "method", "data", "learning",
-        "deep", "neural", "paper", "study", "result", "performance",
-        "task", "dataset", "training", "evaluation", "research",
-    }
-
-    # 1. Extraer keywords del estudio (solo si study_text contiene "Keywords:")
+def extract_study_seeds(study_text: str, concepts_query: dict, focus_terms: list[str]) -> tuple[
+    list[str], list[list[str]]]:
+    generic_terms = {"natural", "language", "processing", "model", "system", "using", "based", "approach", "method",
+                     "data", "learning", "deep", "neural", "paper", "study", "result", "performance", "task", "dataset",
+                     "training", "evaluation", "research"}
     study_keywords = []
     for line in study_text.splitlines():
         if line.lower().startswith("keywords:"):
             raw = line.split(":", 1)[1]
-            study_keywords = [
-                k.strip().lower()
-                for k in raw.replace("·", ",").split(",")
-                if k.strip() and len(k.strip()) > 2 and k.strip() not in generic_terms
-            ]
+            study_keywords = [k.strip().lower() for k in raw.replace("·", ",").split(",") if
+                              k.strip() and len(k.strip()) > 2 and k.strip() not in generic_terms]
             break
-    # Si no se encontró, intentar extraer del JSON? Pero study_text ya es el texto completo.
 
-    # 2. Construir seed_topic_list a partir de concepts_query
-    seed_topic_list = []
-    concept_seed_terms = []
-
+    seed_topic_list, concept_seed_terms = [], []
     for concept in concepts_query.get("concepts", []):
-        name = concept.get("name", "")
-        query = concept.get("query", "")
-        desc = concept.get("description", "")
-        raw_terms = []
-        raw_terms.extend(name.lower().replace("-", " ").split())
-        raw_terms.extend(query.lower().split()[:20])
-        raw_terms.extend(desc.lower().split()[:15])
-        filtered = [
-            t.strip(".,?():")
-            for t in raw_terms
-            if len(t) > 3 and t not in generic_terms
-        ]
-        seen = set()
-        unique = []
+        raw_terms = concept.get("name", "").lower().split() + concept.get("query", "").lower().split()[
+            :20] + concept.get("description", "").lower().split()[:15]
+        filtered = [t.strip(".,?():") for t in raw_terms if len(t) > 3 and t not in generic_terms]
+        seen, unique = set(), []
         for t in filtered:
-            if t not in seen:
-                seen.add(t)
-                unique.append(t)
+            if t not in seen: seen.add(t); unique.append(t)
         top_terms = unique[:12]
         seed_topic_list.append(top_terms)
         concept_seed_terms.extend(top_terms[:6])
 
-    # 3. Combinar todos los términos con pesos (focus_terms con peso 5, study_keywords peso 2, concept_seed_terms peso 1)
     all_seeds = []
-    if focus_terms:
-        for term in focus_terms:
-            if term not in generic_terms:
-                all_seeds.extend([term] * 5)
+    for term in focus_terms:
+        if term not in generic_terms: all_seeds.extend([term] * 5)
     for term in study_keywords:
-        if term not in generic_terms:
-            all_seeds.extend([term] * 2)
+        if term not in generic_terms: all_seeds.extend([term] * 2)
     for term in concept_seed_terms:
-        if term not in generic_terms:
-            all_seeds.append(term)
+        if term not in generic_terms: all_seeds.append(term)
 
-    # Eliminar duplicados manteniendo orden (primera aparición)
-    seen = set()
-    final_seeds = []
+    seen, final_seeds = set(), []
     for t in all_seeds:
-        if t not in seen:
-            seen.add(t)
-            final_seeds.append(t)
-
-    seed_terms = final_seeds[:N_SEED_TERMS]
-
-    writeLog("info", logger,
-             f"[Discovery] Seed terms ({len(seed_terms)}): "
-             f"{', '.join(seed_terms[:10])}{'...' if len(seed_terms) > 10 else ''}")
-    if seed_topic_list:
-        writeLog("info", logger,
-                 f"[Discovery] Seed topic list: {len(seed_topic_list)} topics")
-
-    return seed_terms, seed_topic_list
+        if t not in seen: seen.add(t); final_seeds.append(t)
+    return final_seeds[:N_SEED_TERMS], seed_topic_list
 
 
 # --------------------------------------------------
-# TEXT BUILDER with seed prepending and length limits
+# HELPERS (Sin cambios)
 # --------------------------------------------------
-
 def build_text(paper: dict, seed_terms: Optional[list[str]] = None, max_section_chars: int = 8000) -> str:
-    """
-    Construye el texto de un documento para el pipeline, con límites por sección
-    para evitar que un solo documento sature el tokenizador.
-    """
     parts = []
-    if seed_terms:
-        parts.append(" ".join(seed_terms))
-    parts.extend([
-        paper.get("title", ""),
-        paper.get("abstract", ""),
-        " ".join(paper.get("keywords") or []),
-    ])
+    if seed_terms: parts.append(" ".join(seed_terms))
+    parts.extend([paper.get("title", ""), paper.get("abstract", ""), " ".join(paper.get("keywords") or [])])
     clean_text = paper.get("clean_text", "")
-    if clean_text and len(clean_text) > 500:
-        parts.append(clean_text[:max_section_chars * 2])
+    if clean_text and len(clean_text) > 500: parts.append(clean_text[:max_section_chars * 2])
     sections = paper.get("clean_sections", {})
     for sec in RELEVANT_SECTIONS:
         sec_text = sections.get(sec, "")
-        if sec_text and len(sec_text) > 100:
-            parts.append(sec_text[:max_section_chars])
+        if sec_text and len(sec_text) > 100: parts.append(sec_text[:max_section_chars])
     if len(" ".join(parts)) < 1000:
         full_text = paper.get("full_text", "")
-        if full_text and len(full_text) > 500:
-            parts.append(full_text[:max_section_chars * 2])
+        if full_text and len(full_text) > 500: parts.append(full_text[:max_section_chars * 2])
     return " ".join(parts)
 
 
-# --------------------------------------------------
-# SECTION COLLECTION WITH BATCH ENCODING (EFFICIENCY)
-# --------------------------------------------------
-
-def collect_candidate_sections(
-    clean_corpus: list[dict],
-    seed_terms: list[str],
-    max_section_chars: int = 8000
-) -> List[Tuple[str, str, str]]:
-    """
-    Returns a list of (paper_id, section_name, section_text) for all sections
-    that have enough text. No filtering by relevance yet – that will be done
-    with batch embedding.
-    """
+def collect_candidate_sections(clean_corpus: list[dict], seed_terms: list[str], max_section_chars: int = 8000) -> List[
+    Tuple[str, str, str]]:
     candidates = []
     for paper in clean_corpus:
         paper_id = paper.get("paper_id")
@@ -318,351 +190,181 @@ def collect_candidate_sections(
         for sec_name in RELEVANT_SECTIONS:
             sec_text = sections.get(sec_name, "")
             if sec_text and len(sec_text) > 50:
-                # Build final text with seed terms and title (same as filter_sections_by_relevance would do)
                 text_parts = []
-                if seed_terms:
-                    text_parts.append(" ".join(seed_terms))
+                if seed_terms: text_parts.append(" ".join(seed_terms))
                 text_parts.append(paper.get("title", ""))
-                # Truncar la sección para evitar textos excesivamente largos
-                truncated_sec = sec_text[:max_section_chars]
-                text_parts.append(truncated_sec)
-                final_text = " ".join(text_parts)
-                candidates.append((paper_id, sec_name, final_text))
+                text_parts.append(sec_text[:max_section_chars])
+                candidates.append((paper_id, sec_name, " ".join(text_parts)))
     return candidates
 
 
-def filter_sections_batch(
-    candidates: List[Tuple[str, str, str]],
-    study_embedding: np.ndarray,
-    focus_embedding: np.ndarray,
-    embedding_model: SentenceTransformer,
-    threshold: float = OFF_TOPIC_THRESHOLD,
-    alpha: float = 0.5,
-) -> List[Tuple[str, str, str]]:
-    """
-    Encodes candidate texts and filters by hybrid similarity.
-    """
-    if not candidates:
-        return []
+def filter_sections_batch(candidates: List[Tuple[str, str, str]], study_embedding: np.ndarray,
+                          focus_embedding: np.ndarray, embedding_model: SentenceTransformer,
+                          threshold: float = OFF_TOPIC_THRESHOLD, alpha: float = 0.5) -> List[Tuple[str, str, str]]:
+    if not candidates: return []
     texts = [c[2] for c in candidates]
-    embeddings = embedding_model.encode(
-        texts,
-        normalize_embeddings=True,
-        batch_size=32,
-        show_progress_bar=False
-    )
+    embeddings = embedding_model.encode(texts, normalize_embeddings=True, batch_size=32, show_progress_bar=False)
     kept = []
     for (paper_id, sec_name, sec_text), emb in zip(candidates, embeddings):
         sim_full = float(np.dot(study_embedding, emb))
-        if focus_embedding is not None:
-            sim_focus = float(np.dot(focus_embedding, emb))
-            sim = alpha * sim_full + (1 - alpha) * sim_focus
-        else:
-            sim = sim_full
-        if sim >= threshold:
-            kept.append((paper_id, sec_name, sec_text))
+        sim = alpha * sim_full + (1 - alpha) * float(
+            np.dot(focus_embedding, emb)) if focus_embedding is not None else sim_full
+        if sim >= threshold: kept.append((paper_id, sec_name, sec_text))
     return kept
 
 
-# --------------------------------------------------
-# POST-CLUSTERING FILTER (reuses embeddings)
-# --------------------------------------------------
-
-def filter_off_topic_concepts(
-    concepts:        list[dict],
-    doc_topic_map:   list[dict],
-    embedding_model: SentenceTransformer,
-    study_embedding: np.ndarray,
-    focus_embedding: np.ndarray = None,
-    threshold:       float = OFF_TOPIC_THRESHOLD,
-    alpha:           float = 0.5,
-) -> tuple[list[dict], list[dict]]:
-    """
-    Filters out topics that are off-topic with respect to the study.
-    Uses hybrid similarity if focus_embedding is provided.
-    """
-    if study_embedding is None or not concepts:
-        return concepts, doc_topic_map
-
-    kept = []
-    removed = []
-
+def filter_off_topic_concepts(concepts: list[dict], doc_topic_map: list[dict], embedding_model: SentenceTransformer,
+                              study_embedding: np.ndarray, focus_embedding: np.ndarray = None,
+                              threshold: float = OFF_TOPIC_THRESHOLD, alpha: float = 0.5) -> tuple[
+    list[dict], list[dict]]:
+    if study_embedding is None or not concepts: return concepts, doc_topic_map
+    kept, removed = [], []
     for concept in concepts:
-        topic_text = " ".join([
-            concept.get("label", ""),
-            " ".join(concept.get("keywords", [])[:10]),
-        ])
-        topic_embedding = embedding_model.encode(
-            topic_text[:2000],
-            normalize_embeddings=True,
-        )
+        topic_text = " ".join([concept.get("label", ""), " ".join(concept.get("keywords", [])[:10])])
+        topic_embedding = embedding_model.encode(topic_text[:2000], normalize_embeddings=True)
         sim_full = float(np.dot(study_embedding, topic_embedding))
-        if focus_embedding is not None:
-            sim_focus = float(np.dot(focus_embedding, topic_embedding))
-            similarity = alpha * sim_full + (1 - alpha) * sim_focus
-        else:
-            similarity = sim_full
+        similarity = alpha * sim_full + (1 - alpha) * float(
+            np.dot(focus_embedding, topic_embedding)) if focus_embedding is not None else sim_full
         concept["study_similarity"] = round(similarity, 4)
-
         if similarity >= threshold:
             kept.append(concept)
-            writeLog("info", logger,
-                     f"[Discovery] ✓ topic {concept['concept_id']} "
-                     f"'{concept['label'][:40]}' sim={similarity:.3f} — kept")
         else:
             removed.append(concept)
-            writeLog("info", logger,
-                     f"[Discovery] ✗ topic {concept['concept_id']} "
-                     f"'{concept['label'][:40]}' sim={similarity:.3f} < {threshold} — off-topic, removed")
-
-    if removed:
-        writeLog("info", logger, f"[Discovery] Filtered {len(removed)} off-topic topic(s)")
-
     removed_ids = {c["concept_id"] for c in removed}
-    filtered_map = [entry for entry in doc_topic_map if entry["topic"] not in removed_ids]
-
-    return kept, filtered_map
+    return kept, [entry for entry in doc_topic_map if entry["topic"] not in removed_ids]
 
 
 # --------------------------------------------------
-# BERTOPIC ENGINE (chunk-level, no majority vote)
+# NUEVO: MOTOR DE DESCUBRIMIENTO POR SUBCONJUNTO (SLR Orientado a RQ)
 # --------------------------------------------------
-
-def concept_discovery_bertopic(
-    clean_corpus:    list[dict],
-    seed_terms:      list[str],
-    seed_topic_list: list[list[str]],
-    study_embedding: np.ndarray,
-    focus_embedding: np.ndarray,
-    embedding_model: SentenceTransformer,
-    study_text:      str,
+def discover_topics_for_subset(
+        subset_corpus: list[dict],
+        rq_seeds: list[str],
+        study_embedding: np.ndarray,
+        focus_embedding: np.ndarray,
+        embedding_model: SentenceTransformer,
+        seed_terms: list[str]  # Seeds globales para dar contexto al vectorizador
 ) -> dict:
+    """
+    Ejecuta BERTopic o Fallback sobre un subconjunto de papers.
+    """
+    n = len(subset_corpus)
 
-    # 1. Collect all candidate sections and filter by relevance (batch)
-    candidates = collect_candidate_sections(clean_corpus, seed_terms)
+    if n < 10:
+        return fallback_concept_discovery(subset_corpus, seed_terms, study_embedding, focus_embedding, embedding_model,
+                                          "")
+
+    candidates = collect_candidate_sections(subset_corpus, seed_terms)
     if len(candidates) < 5:
-        writeLog("warning", logger, "[BERTopic] Too few sections after candidate collection, falling back")
-        return fallback_concept_discovery(clean_corpus, seed_terms, study_embedding, focus_embedding, embedding_model, study_text)
+        return fallback_concept_discovery(subset_corpus, seed_terms, study_embedding, focus_embedding, embedding_model,
+                                          "")
 
-    kept_sections = filter_sections_batch(
-        candidates,
-        study_embedding,
-        focus_embedding,
-        embedding_model,
-        threshold=OFF_TOPIC_THRESHOLD
-    )
-
+    kept_sections = filter_sections_batch(candidates, study_embedding, focus_embedding, embedding_model)
     if len(kept_sections) < 5:
-        writeLog("warning", logger, "[BERTopic] Too few sections after relevance filtering, falling back")
-        return fallback_concept_discovery(clean_corpus, seed_terms, study_embedding, focus_embedding, embedding_model, study_text)
+        return fallback_concept_discovery(subset_corpus, seed_terms, study_embedding, focus_embedding, embedding_model,
+                                          "")
 
-    # Prepare chunk texts and metadata
     chunk_texts = [sec[2] for sec in kept_sections]
-    chunk_metadata = [(sec[0], sec[1]) for sec in kept_sections]  # (paper_id, section_name)
+    chunk_metadata = [(sec[0], sec[1]) for sec in kept_sections]
 
-    writeLog("info", logger, f"[BERTopic] Working with {len(chunk_texts)} chunks from {len(set(m[0] for m in chunk_metadata))} papers")
+    writeLog("info", logger,
+             f"  -> Sub-engine processing {len(chunk_texts)} chunks from {len(set(m[0] for m in chunk_metadata))} papers")
 
-    # 2. Encode chunks (usando el modelo ya cargado)
-    embeddings = embedding_model.encode(
-        chunk_texts,
-        show_progress_bar=True,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        batch_size=16,
-    )
+    embeddings = embedding_model.encode(chunk_texts, show_progress_bar=False, normalize_embeddings=True,
+                                        convert_to_numpy=True, batch_size=32)
 
-    # 3. UMAP + HDBSCAN
-    umap_model = UMAP(
-        n_neighbors=max(2, min(15, len(chunk_texts) - 1)),
-        n_components=UMAP_COMPONENTS,
-        metric="cosine",
-        random_state=42,
-    )
-    hdbscan_model = hdbscan.HDBSCAN(
-        min_cluster_size=max(MIN_CLUSTER_SIZE, min(5, len(chunk_texts) // 15)),
-        min_samples=1,
-        metric="euclidean",
-        cluster_selection_method="eom",
-        prediction_data=True,
-    )
-
-    # 4. BERTopic with guided seed topics and custom vectorizer
+    umap_model = UMAP(n_neighbors=max(2, min(15, len(chunk_texts) - 1)), n_components=UMAP_COMPONENTS, metric="cosine",
+                      random_state=42)
+    hdbscan_model = HDBSCAN(min_cluster_size=max(MIN_CLUSTER_SIZE, min(5, len(chunk_texts) // 15)), min_samples=1,
+                            metric="euclidean", cluster_selection_method="eom", prediction_data=True)
     vectorizer = create_custom_vectorizer()
-    topic_model = BERTopic(
-        umap_model=umap_model,
-        hdbscan_model=hdbscan_model,
-        vectorizer_model=vectorizer,
-        seed_topic_list=seed_topic_list if seed_topic_list else None,
-        calculate_probabilities=True,
-        verbose=True,
-    )
 
-    topics, probs = topic_model.fit_transform(chunk_texts, embeddings)
+    topic_model = BERTopic(
+        umap_model=umap_model, hdbscan_model=hdbscan_model, vectorizer_model=vectorizer,
+        seed_topic_list=[rq_seeds] if rq_seeds else None, calculate_probabilities=True, verbose=False
+    )
+    topics, _ = topic_model.fit_transform(chunk_texts, embeddings)
     topics = list(topics)
 
-    # Fallback if no clusters found
     valid_topics = [t for t in topics if t != -1]
     if len(set(valid_topics)) <= 1 or len(valid_topics) < max(2, len(chunk_texts) * 0.15):
-        writeLog("info", logger, "[BERTopic] Insufficient clusters → fallback params")
         topic_model = BERTopic(
             umap_model=UMAP(n_neighbors=3, n_components=5, random_state=42),
             hdbscan_model=HDBSCAN(min_cluster_size=2, min_samples=1),
-            vectorizer_model=vectorizer,
-            seed_topic_list=seed_topic_list if seed_topic_list else None,
-            min_topic_size=2,
-            verbose=True,
+            vectorizer_model=vectorizer, seed_topic_list=[rq_seeds] if rq_seeds else None, min_topic_size=2,
+            verbose=False
         )
-        topics, probs = topic_model.fit_transform(chunk_texts, embeddings)
+        topics, _ = topic_model.fit_transform(chunk_texts, embeddings)
         topics = list(topics)
 
-    # 5. Extract topic info and build concepts
-    topic_info = topic_model.get_topic_info()
-    concepts = []
-    # For each topic, we need paper_ids and chunks count
     topic_to_chunks = {tid: [] for tid in set(topics) if tid != -1}
     for idx, t in enumerate(topics):
-        if t != -1:
-            topic_to_chunks[t].append(idx)
+        if t != -1: topic_to_chunks[t].append(idx)
 
+    concepts = []
     for topic_id, chunk_indices in topic_to_chunks.items():
-        if len(chunk_indices) < 2:
-            continue
+        if len(chunk_indices) < 2: continue
         words = topic_model.get_topic(topic_id)
-        # Filter keywords with regex (no digits) and extra stopwords
-        filtered_words = []
-        for w, s in words[:20]:
-            if re.search(r'\d', w):
-                continue
-            if w.lower() in EXTRA_STOPWORDS or w in DEFAULT_STOPS:
-                continue
-            if len(w) < 3:
-                continue
-            filtered_words.append((w, s))
-        if not filtered_words:
-            filtered_words = words[:10]
+        filtered_words = [(w, s) for w, s in words[:20] if not re.search(r'\d',
+                                                                         w) and w.lower() not in EXTRA_STOPWORDS and w not in DEFAULT_STOPS and len(
+            w) > 2]
+        if not filtered_words: filtered_words = words[:10]
         label_words = [w for w, _ in filtered_words[:6]]
-        label = " ".join(label_words)[:80]
-
-        # Unique paper_ids for this topic
         paper_ids = list({chunk_metadata[i][0] for i in chunk_indices})
         concepts.append({
             "concept_id": int(topic_id),
-            "label": label if label else f"topic_{topic_id}",
-            "n_chunks": len(chunk_indices),
-            "n_papers": len(paper_ids),
-            "keywords": [w for w, _ in filtered_words[:15]],
-            "document_indices": paper_ids,
+            "label": " ".join(label_words)[:80] if label_words else f"topic_{topic_id}",
+            "n_chunks": len(chunk_indices), "n_papers": len(paper_ids),
+            "keywords": [w for w, _ in filtered_words[:15]], "document_indices": paper_ids,
         })
 
-    # 6. Build doc_topic_map at chunk level (NO majority vote)
-    # Each entry: {"doc_id": paper_id, "topic": topic_id, "section": section_name}
-    doc_topic_map = []
-    for idx, t in enumerate(topics):
-        if t == -1:
-            continue
-        paper_id, section_name = chunk_metadata[idx]
-        doc_topic_map.append({
-            "doc_id": paper_id,
-            "topic": t,
-            "section": section_name
-        })
-
-    # 7. Filter off-topic concepts (reuses study_embedding and focus_embedding)
-    concepts, doc_topic_map = filter_off_topic_concepts(
-        concepts,
-        doc_topic_map,
-        embedding_model,
-        study_embedding,
-        focus_embedding,
-        OFF_TOPIC_THRESHOLD
-    )
-
-    # Remove concepts that lost all chunks (should not happen)
-    valid_topic_ids = {c["concept_id"] for c in concepts}
-    doc_topic_map = [e for e in doc_topic_map if e["topic"] in valid_topic_ids]
+    doc_topic_map = [{"doc_id": chunk_metadata[idx][0], "topic": t, "section": chunk_metadata[idx][1]} for idx, t in
+                     enumerate(topics) if t != -1]
+    concepts, doc_topic_map = filter_off_topic_concepts(concepts, doc_topic_map, embedding_model, study_embedding,
+                                                        focus_embedding)
 
     return {
-        "schema_version": "1.4",
-        "n_documents": len(set(e["doc_id"] for e in doc_topic_map)),  # unique papers
-        "n_chunks": len(doc_topic_map),                               # total assignments
-        "n_topics": len(concepts),
-        "concepts": concepts,
-        "doc_topic_map": doc_topic_map,
+        "n_documents": len(set(e["doc_id"] for e in doc_topic_map)),
+        "n_chunks": len(doc_topic_map), "n_topics": len(concepts),
+        "concepts": concepts, "doc_topic_map": doc_topic_map,
     }
 
 
-# --------------------------------------------------
-# FALLBACK ENGINE (simplified, but using same POS vectorizer)
-# --------------------------------------------------
-
-def fallback_concept_discovery(
-    clean_corpus:    list[dict],
-    seed_terms:      list[str],
-    study_embedding: np.ndarray,
-    focus_embedding: np.ndarray,
-    embedding_model: SentenceTransformer,
-    study_text:      str,
-) -> dict:
-    # Build full-text documents (no chunking)
+def fallback_concept_discovery(clean_corpus: list[dict], seed_terms: list[str], study_embedding: np.ndarray,
+                               focus_embedding: np.ndarray, embedding_model: SentenceTransformer,
+                               study_text: str) -> dict:
     docs = [build_text(p, seed_terms) for p in clean_corpus]
     paper_ids = [p.get("paper_id") for p in clean_corpus]
-
-    # Use POSFilterVectorizer for TF-IDF
-    vectorizer = POSFilterVectorizer(
-        nlp_model=nlp,
-        ngram_range=(1, 2),
-        min_df=2,
-        max_df=0.85,
-        max_features=2000
-    )
+    n_docs = len(docs)
+    dynamic_min_df = 1 if n_docs < 2 else 2
+    dynamic_max_df = 1.0 if n_docs < 5 else 0.85
+    vectorizer = POSFilterVectorizer(nlp_model=nlp, ngram_range=(1, 2), min_df=dynamic_min_df, max_df=dynamic_max_df,
+                                     max_features=2000)
     X = vectorizer.fit_transform(docs)
     n_clus = max(2, min(5, len(docs) // 3))
     labels = KMeans(n_clusters=n_clus, random_state=42).fit_predict(X)
-
-    doc_topic_map = [
-        {"doc_id": paper_ids[idx], "topic": int(label)}
-        for idx, label in enumerate(labels)
-    ]
-
+    doc_topic_map = [{"doc_id": paper_ids[idx], "topic": int(label)} for idx, label in enumerate(labels)]
     feature_names = vectorizer.get_feature_names_out()
     concepts = []
     for cluster_id in sorted(set(labels)):
         cluster_docs = [idx for idx, lbl in enumerate(labels) if lbl == cluster_id]
         cluster_center = X[labels == cluster_id].mean(axis=0).A1
         top_indices = cluster_center.argsort()[-10:][::-1]
-        top_terms = [feature_names[i] for i in top_indices
-                     if not re.search(r'\d', feature_names[i]) and feature_names[i] not in EXTRA_STOPWORDS][:8]
-        concepts.append({
-            "concept_id": int(cluster_id),
-            "label": " ".join(top_terms[:4]) if top_terms else f"cluster_{cluster_id}",
-            "n_papers": len(cluster_docs),
-            "keywords": top_terms,
-            "document_indices": [paper_ids[i] for i in cluster_docs],
-        })
-
-    concepts, doc_topic_map = filter_off_topic_concepts(
-        concepts,
-        doc_topic_map,
-        embedding_model,
-        study_embedding,
-        focus_embedding,
-        OFF_TOPIC_THRESHOLD
-    )
-
-    return {
-        "schema_version": "1.4",
-        "n_documents": len(doc_topic_map),
-        "n_chunks": len(doc_topic_map),  # in fallback, same as n_documents
-        "n_topics": len(concepts),
-        "concepts": concepts,
-        "doc_topic_map": doc_topic_map,
-    }
+        top_terms = [feature_names[i] for i in top_indices if
+                     not re.search(r'\d', feature_names[i]) and feature_names[i] not in EXTRA_STOPWORDS][:8]
+        concepts.append(
+            {"concept_id": int(cluster_id), "label": " ".join(top_terms[:4]) if top_terms else f"cluster_{cluster_id}",
+             "n_papers": len(cluster_docs), "keywords": top_terms,
+             "document_indices": [paper_ids[i] for i in cluster_docs]})
+    concepts, doc_topic_map = filter_off_topic_concepts(concepts, doc_topic_map, embedding_model, study_embedding,
+                                                        focus_embedding)
+    return {"n_documents": len(doc_topic_map), "n_chunks": len(doc_topic_map), "n_topics": len(concepts),
+            "concepts": concepts, "doc_topic_map": doc_topic_map}
 
 
 # --------------------------------------------------
-# ENTRY POINT
+# ENTRY POINT: ORQUESTADOR SLR ORIENTADO A PREGUNTAS
 # --------------------------------------------------
-
 def processDiscoveryEngine():
     input_dir, output_dir = inicioModulo("processDiscoveryEngine")
     text_file = output_dir / "papers_text.json"
@@ -672,77 +374,162 @@ def processDiscoveryEngine():
         return None
 
     with open(text_file, "r", encoding="utf-8") as f:
-        corpus = json.load(f)
+        full_corpus = json.load(f)
 
-    writeLog("info", logger, f"[Discovery] Loaded {len(corpus)} papers from papers_text.json")
-
-    # 🔥 NUEVO: leer contexto (ahora JSON)
     study_text, concepts_query, focus_terms = load_study_context(input_dir)
-    if study_text:
-        writeLog("info", logger, f"[Discovery] Study description loaded ({len(study_text)} chars)")
-    if concepts_query:
-        writeLog("info", logger, f"[Discovery] {len(concepts_query.get('concepts', []))} objective concepts loaded")
-    if focus_terms:
-        writeLog("info", logger, f"[Discovery] Focus terms: {', '.join(focus_terms[:10])}...")
-
-    # Extraer seeds (ahora devuelve seed_terms y seed_topic_list)
     seed_terms, seed_topic_list = extract_study_seeds(study_text, concepts_query, focus_terms)
 
-    # 🔥 NUEVO: instanciar modelo UNA SOLA VEZ
     embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+    study_embedding = embedding_model.encode(study_text[:4000], normalize_embeddings=True) if study_text else None
+    focus_embedding = embedding_model.encode(" ".join(focus_terms), normalize_embeddings=True) if focus_terms else None
 
-    # Calcular study_embedding (del texto completo)
-    study_embedding = embedding_model.encode(
-        study_text[:4000] if study_text else "",
-        normalize_embeddings=True,
-    ) if study_text else None
+    # -----------------------------------------------------------------
+    # OPTIMIZACIÓN SOA: Calcular embeddings UNA SOLA VEZ
+    # FIX: Usar 'clean_text' (que es donde está el abstract real en este JSON)
+    # -----------------------------------------------------------------
+    writeLog("info", logger, f"[Discovery] Computing global text embeddings for {len(full_corpus)} papers...")
+    full_texts = [p.get("title", "") + " " + p.get("clean_text", "")[:1500] for p in full_corpus]
+    global_abstract_embeddings = embedding_model.encode(full_texts, normalize_embeddings=True, batch_size=64,
+                                                        show_progress_bar=False)
 
-    # 🔥 NUEVO: focus_embedding SOLO con focus_terms (sin texto adicional)
-    focus_embedding = None
-    if focus_terms:
-        focus_text = " ".join(focus_terms)
-        focus_embedding = embedding_model.encode(
-            focus_text,
-            normalize_embeddings=True,
-        )
-        writeLog("info", logger, f"[Discovery] Focus embedding computed from {len(focus_terms)} terms")
+    rq_list = concepts_query.get("concepts", [])
 
-    # Ejecutar discovery pasando el modelo
-    n = len(corpus)
-    if n < 10:
-        result = fallback_concept_discovery(
-            corpus,
-            seed_terms,
-            study_embedding,
-            focus_embedding,
-            embedding_model,
-            study_text
-        )
+    if not rq_list:
+        writeLog("warning", logger, "[Discovery] No concepts found in conceptsQuery.json. Falling back to global mode.")
+        result = discover_topics_for_subset(full_corpus, [], study_embedding, focus_embedding, embedding_model,
+                                            seed_terms)
+        final_dict_output = {
+            "schema_version": "1.5", "n_documents": result["n_documents"], "n_topics": result["n_topics"],
+            "concepts": result.get("concepts", []), "doc_topic_map": result.get("doc_topic_map", [])
+        }
     else:
-        if n < 20:
-            writeLog("info", logger, "[BERTopic] Small corpus (<20 docs) — results may be unstable")
-        result = concept_discovery_bertopic(
-            corpus,
-            seed_terms,
-            seed_topic_list,
-            study_embedding,
-            focus_embedding,
-            embedding_model,
-            study_text
-        )
+        internal_rq_results = []
+        writeLog("info", logger,
+                 f"[Discovery] Starting Query-Driven Discovery for {len(rq_list)} Research Questions...")
 
-    # Guardar output
+        for i, rq in enumerate(rq_list):
+            rq_text_parts = [rq.get("name", ""), rq.get("query", "")]
+            rq_query_text = " ".join(rq_text_parts)
+
+            # -----------------------------------------------------
+            # FASE 1: HARD FILTER (Filtro Léxico obligatorio)
+            # FIX: Buscar en 'clean_text' en lugar de 'abstract' inexistente
+            # -----------------------------------------------------
+            doc_rq = nlp(rq_query_text)
+            rq_key_phrases = [
+                token.lemma_.lower() for token in doc_rq
+                if token.pos_ in ("NOUN", "PROPN", "ADJ", "VERB")
+                   and len(token.text) > 3
+                   and not token.is_stop
+                   and token.text.lower() not in ("how", "what", "can", "does", "which", "from", "with", "that", "this",
+                                                  "than", "both", "are", "been", "have")
+            ]
+            rq_checklist = set(rq_key_phrases[:15])
+
+            hard_filtered_indices = []
+            for idx, paper in enumerate(full_corpus):
+                # FIX: Usar title + clean_text
+                paper_text = (paper.get("title", "") + " " + paper.get("clean_text", "")).lower()
+                matches = sum(1 for keyword in rq_checklist if keyword in paper_text)
+                if matches >= 2:
+                    hard_filtered_indices.append(idx)
+
+            # -----------------------------------------------------
+            # FASE 2: SOFT FILTER (Embeddings)
+            # FIX: Controlar la variable 'similarities' correctamente en ambas ramas
+            # -----------------------------------------------------
+            selected_similarities = np.array([])  # Inicializamos por si falla todo
+
+            if len(hard_filtered_indices) >= 10:
+                subset_texts = [full_texts[idx] for idx in hard_filtered_indices]
+                subset_embeddings = global_abstract_embeddings[hard_filtered_indices]
+
+                rq_embedding = embedding_model.encode(rq_query_text, normalize_embeddings=True)
+                similarities = np.dot(subset_embeddings, rq_embedding)
+
+                k = max(10, int(len(hard_filtered_indices) * 0.8))
+                top_local_indices = np.argsort(similarities)[-k:]
+                top_indices = [hard_filtered_indices[i] for i in top_local_indices]
+
+                selected_similarities = similarities[top_local_indices]  # Guardamos las sims de los seleccionados
+                writeLog("info", logger,
+                         f"  -> Hard filter matched {len(hard_filtered_indices)} papers. Soft re-ranked to {len(top_indices)}.")
+            else:
+                k = int(len(full_corpus) * 0.5)
+                rq_embedding = embedding_model.encode(rq_query_text, normalize_embeddings=True)
+                similarities = np.dot(global_abstract_embeddings, rq_embedding)
+
+                top_indices = list(np.argsort(similarities)[-k:])
+                selected_similarities = similarities[top_indices]  # Guardamos las sims de los seleccionados
+                writeLog("info", logger,
+                         f"  -> Hard filter too strict ({len(hard_filtered_indices)} papers). Using Top 50% fallback ({k} papers).")
+
+            subset_corpus = [full_corpus[idx] for idx in top_indices]
+
+            # 2. Ejecutar descubrimiento local
+            rq_seeds = seed_topic_list[i] if i < len(seed_topic_list) else []
+            rq_result = discover_topics_for_subset(
+                subset_corpus, rq_seeds, study_embedding, focus_embedding, embedding_model, seed_terms
+            )
+
+            # 3. Guardar resultado interno de esta RQ
+            # FIX: Usar 'selected_similarities' que siempre existe ahora
+            internal_rq_results.append({
+                "concept_id": str(i),
+                "concept_query": rq.get("query", ""),
+                "focus_terms_used": focus_terms,
+                "focus_density": float(round(np.mean(selected_similarities), 3)) if len(
+                    selected_similarities) > 0 else 0.0,
+                "total_evidences": rq_result["n_chunks"],
+                "n_clusters": rq_result["n_topics"],
+                "clusters": rq_result["concepts"],
+                "doc_topic_map": rq_result["doc_topic_map"]
+            })
+
+        # -----------------------------------------------------------------
+        # COMPATIBILIDAD: Aplanar resultados
+        # -----------------------------------------------------------------
+        merged_concepts = []
+        merged_doc_topic_map = []
+        topic_id_offset = 0
+
+        for rq_data in internal_rq_results:
+            for concept in rq_data.get("clusters", []):
+                concept["concept_id"] = int(concept["concept_id"]) + topic_id_offset
+                concept["source_rq"] = rq_data.get("concept_query", "")[:100]
+                merged_concepts.append(concept)
+
+            for mapping in rq_data.get("doc_topic_map", []):
+                mapping["topic"] = int(mapping["topic"]) + topic_id_offset
+                merged_doc_topic_map.append(mapping)
+
+            topic_id_offset += 100
+
+        final_dict_output = {
+            "schema_version": "1.5",
+            "n_documents": len(set(m["doc_id"] for m in merged_doc_topic_map)),
+            "n_topics": len(merged_concepts),
+            "concepts": merged_concepts,
+            "doc_topic_map": merged_doc_topic_map
+        }
+
+    # Guardar outputs
     output_file = output_dir / "candidate_concepts.json"
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
+        json.dump(final_dict_output, f, indent=2, ensure_ascii=False)
 
-    writeLog("info", logger, f"[Discovery] Saved to {output_file}")
+    output_file_rq = output_dir / "candidate_concepts_by_rq.json"
+    if 'internal_rq_results' in locals():
+        with open(output_file_rq, "w", encoding="utf-8") as f:
+            json.dump(internal_rq_results, f, indent=2, ensure_ascii=False)
+
+    writeLog("info", logger, f"\n{'=' * 60}")
+    writeLog("info", logger, f"[Discovery] SLR Query-Driven COMPLETED")
     writeLog("info", logger,
-             f"[Discovery] {result['n_topics']} topics, "
-             f"{result['n_documents']} papers, {result.get('n_chunks', result['n_documents'])} chunk assignments")
-    writeLog("info", logger, "✅ [END] discoveryEngine")
+             f"[Discovery] Merged Output: {final_dict_output['n_topics']} unique clusters across all RQs")
+    writeLog("info", logger, f"✅ [END] discoveryEngine")
 
-    return result
+    return final_dict_output
 
 
 if __name__ == "__main__":
