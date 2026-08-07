@@ -34,9 +34,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
-from tqdm import tqdm  # <-- AÑADIDO
+from tqdm import tqdm
 
 from sources.common.common import logger, writeLog
 from sources.common.llm_client import LLMClient, create_ollama_client
@@ -55,7 +55,7 @@ class TrainingConfig:
     min_display_similarity: float = 0.35
     max_evidences_to_show: int = 30
     max_chars_per_emerging: int = 8000
-    translate_evidences: bool = False  # Ya no se usa para citas, pero mantenemos por compatibilidad
+    translate_evidences: bool = False
     translation_cache_file: str = "translation_cache.json"
     translation_max_chars: int = 3000
     llm_temperature: float = 0.2
@@ -96,6 +96,7 @@ class EvidenceItem:
     text: str
     similarity: float
     structured_evidence: Dict = field(default_factory=dict, compare=False, hash=False)
+    narrative_summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,7 @@ class EmergingTopic:
 @dataclass(frozen=True)
 class SearchStrategyStats:
     query_text: str
+    objectives_text: str   # NUEVO: objetivos de investigación
     n_objective_concepts: int
     n_candidates: int
     n_aligned: int
@@ -146,7 +148,7 @@ class DocumentModel:
     concept_cards: Tuple[ConceptCard, ...]
     emerging_topics: Tuple[EmergingTopic, ...]
     technical_concepts: Tuple[Dict, ...]
-    bibliography: Dict[str, str]
+    bibliography: Dict[str, Dict]  # AHORA: doc_id -> {title, doi, citation_count}
 
 
 # ---------------------------------------------------------------------------
@@ -249,16 +251,17 @@ class DocumentDataBuilder:
         candidate_concepts: Dict,
         concepts_with_tech: List[Dict],
         papers_text: Dict,
+        objectives_text: str,                     # NUEVO
+        metadata_lookup: Dict[str, Dict],         # NUEVO
     ) -> DocumentModel:
         aligned_lookup = {
             str(ac.get("concept_id")): ac
             for ac in aligned_concepts.get("aligned_concepts", [])
         }
         search_stats, emergent_ids = self._build_search_stats(
-            concepts_query, aligned_concepts, candidate_concepts
+            concepts_query, aligned_concepts, candidate_concepts, objectives_text
         )
 
-        # Barra de progreso para construir tarjetas de concepto
         concept_cards = []
         for c_data in tqdm(findings_data, desc="Construyendo tarjetas de concepto"):
             concept_cards.append(self._build_concept_card(c_data, aligned_lookup))
@@ -267,7 +270,7 @@ class DocumentDataBuilder:
         emerging_topics = self._build_emerging_topics(
             emergent_ids, candidate_concepts, papers_text
         )
-        bibliography = self._build_bibliography(concept_cards)
+        bibliography = self._build_bibliography(concept_cards, metadata_lookup)
 
         return DocumentModel(
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -279,7 +282,11 @@ class DocumentDataBuilder:
         )
 
     def _build_search_stats(
-        self, concepts_query: Dict, aligned_concepts: Dict, candidate_concepts: Dict
+        self,
+        concepts_query: Dict,
+        aligned_concepts: Dict,
+        candidate_concepts: Dict,
+        objectives_text: str,
     ) -> Tuple[SearchStrategyStats, List[str]]:
         aligned_ids = {
             str(ac.get("concept_id"))
@@ -293,6 +300,7 @@ class DocumentDataBuilder:
         ]
         stats = SearchStrategyStats(
             query_text=re.sub(r"\s+", " ", concepts_query.get("query", "")).strip(),
+            objectives_text=objectives_text,
             n_objective_concepts=len(concepts_query.get("concepts", [])),
             n_candidates=candidate_concepts.get("n_topics", 0),
             n_aligned=len(aligned_concepts.get("aligned_concepts", [])),
@@ -322,6 +330,7 @@ class DocumentDataBuilder:
                 text=re.sub(r"\s+", " ", ev.get("text", "")).strip(),
                 similarity=ev["similarity"],
                 structured_evidence=ev.get("structured_evidence", {}),
+                narrative_summary=ev.get("narrative_summary", ""),
             )
 
         valid_evidences = tuple(
@@ -379,17 +388,30 @@ class DocumentDataBuilder:
             c for c in candidate_concepts.get("concepts", [])
             if str(c.get("concept_id")) in id_set
         ]
-        # Barra de progreso para generación de tópicos emergentes (LLM)
         topics = []
         for concept in tqdm(emergent_concepts, desc="Generando tópicos emergentes"):
             topics.append(self._analyzer.analyze(concept, papers_text))
         return tuple(topics)
 
     @staticmethod
-    def _build_bibliography(cards: Tuple[ConceptCard, ...]) -> Dict[str, str]:
-        bibliography: Dict[str, str] = {}
+    def _build_bibliography(
+        cards: Tuple[ConceptCard, ...],
+        metadata_lookup: Dict[str, Dict],
+    ) -> Dict[str, Dict]:
+        """
+        Construye la bibliografía enriqueciendo cada paper con DOI y citation_count
+        desde metadata_lookup.
+        """
+        bibliography: Dict[str, Dict] = {}
         for card in cards:
-            bibliography.update(card.represented_titles)
+            for doc_id, title in card.represented_titles.items():
+                if doc_id not in bibliography:
+                    meta = metadata_lookup.get(doc_id, {})
+                    bibliography[doc_id] = {
+                        "title": title,
+                        "doi": meta.get("doi", ""),
+                        "citation_count": meta.get("citation_count", 0),
+                    }
         return bibliography
 
 
@@ -439,9 +461,10 @@ class MarkdownRenderer:
         )
 
     def _render_search_stats(self, stats: SearchStrategyStats) -> str:
+        # Reemplazamos "Query utilizada" por "Objetivos de la investigación"
         return (
             "## Evaluación de la estrategia de búsqueda\n\n"
-            f"### Query utilizada\n{stats.query_text}\n\n"
+            f"### Objetivos de la investigación\n{stats.objectives_text}\n\n"
             "### Estadísticas\n"
             f"- **Conceptos objetivo:** {stats.n_objective_concepts}\n"
             f"- **Tópicos descubiertos:** {stats.n_candidates}\n"
@@ -463,7 +486,6 @@ class MarkdownRenderer:
                 continue
 
             for idx, finding in enumerate(card.findings, 1):
-                # Traducir el texto del hallazgo
                 finding_text = self._translation_svc.translate(finding.finding_text)
                 lines.append(f"**Hallazgo {idx}:**")
                 lines.append(f"> {finding_text}\n")
@@ -490,11 +512,9 @@ class MarkdownRenderer:
         if meta:
             header += f"*{' · '.join(meta)}*\n"
 
+        # MODIFICADO: solo mostramos el número de papers, sin los IDs
         if card.represented_papers:
-            ids = ", ".join(list(card.represented_papers)[:15])
-            if len(card.represented_papers) > 15:
-                ids += f" ... y {len(card.represented_papers) - 15} más"
-            header += f"\n**Papers representados:** {len(card.represented_papers)}: `{ids}`\n"
+            header += f"\n**Papers representados:** {len(card.represented_papers)}\n"
 
         if not card.findings:
             if card.all_evidences:
@@ -512,7 +532,6 @@ class MarkdownRenderer:
             strength, emoji = self._evidence_strength(
                 finding.avg_evidence_score, finding.evidence_count
             )
-            # Traducir el texto del hallazgo
             finding_text = self._translation_svc.translate(finding.finding_text)
             parts.append(
                 f"\n### Hallazgo {idx}: {emoji} {strength}\n\n"
@@ -522,6 +541,10 @@ class MarkdownRenderer:
             )
         return "\n".join(parts)
 
+    # ------------------------------------------------------------------
+    # Renderizado de evidencias con resumen narrativo
+    # ------------------------------------------------------------------
+
     def _render_evidence_blocks(self, evidences: Tuple[EvidenceItem, ...]) -> str:
         shown = evidences[: self._cfg.max_evidences_to_show]
         if not shown:
@@ -529,28 +552,78 @@ class MarkdownRenderer:
 
         blocks = []
         for ev in shown:
-            # Traducir las secciones estructuradas (ideas, métodos, resultados, aplicaciones)
-            structured_md = self._render_structured(ev.structured_evidence)
-            # La cita textual NO se traduce
-            text = ev.text  # se mantiene en inglés
-            # El título del paper NO se traduce
-            if ev.paper_title and ev.paper_title != "Unknown":
-                title = ev.paper_title
-            else:
-                title = f"ID: {ev.doc_id}"
+            # Traducir el texto de evidencia (el fragmento entre comillas)
+            translated_text = self._translation_svc.translate(ev.text)
+            title = ev.paper_title if ev.paper_title and ev.paper_title != "Unknown" else f"ID: {ev.doc_id}"
 
-            blocks.append(
+            block = (
                 f"- **{title}** "
                 f"(sim: {ev.similarity:.3f}) (ID: `{ev.doc_id}`)\n"
-                f'  *"{text}"*\n'
-                + (f"\n{structured_md}\n" if structured_md else "")
+                f'  *"{translated_text}"*\n'
             )
+
+            if ev.narrative_summary:
+                translated_summary = self._translation_svc.translate(ev.narrative_summary)
+                block += f"\n  *Resumen narrativo:* {translated_summary}\n"
+            else:
+                structured_md = self._render_structured_fallback(ev.structured_evidence)
+                if structured_md:
+                    block += f"\n{structured_md}\n"
+
+            blocks.append(block)
+
         return "\n".join(blocks)
 
+    def _render_structured_fallback(self, structured: Dict) -> str:
+        """
+        Genera un resumen narrativo en forma de párrafo a partir de todos los campos
+        de structured_evidence (en inglés). Se usa cuando no hay narrative_summary.
+        """
+        if not structured:
+            return ""
+
+        # Orden y etiquetas en inglés (todas las claves posibles)
+        field_order = [
+            ("solution", "Main contribution"),
+            ("usage", "Usage"),
+            ("ideas", "Key ideas"),
+            ("methods", "Methodology"),
+            ("results", "Results"),
+            ("applications", "Applications"),
+            ("gap", "Gap addressed"),
+            ("evolutions", "Future work"),
+            ("signals", "Signals"),
+            ("models", "Models"),
+            ("metrics", "Metrics"),
+            ("limitations", "Limitations"),
+        ]
+
+        sentences = []
+        for key, label in field_order:
+            val = structured.get(key)
+            if not val:
+                continue
+            # Convertir listas o dicts a string legible
+            if isinstance(val, list):
+                val = ", ".join(str(v) for v in val if v)
+            elif isinstance(val, dict):
+                val = ", ".join(f"{k}: {v}" for k, v in val.items() if v)
+            if not val:
+                continue
+            translated_val = self._translation_svc.translate(str(val))
+            sentences.append(f"{label}: {translated_val}")
+
+        if not sentences:
+            return ""
+
+        # Unir todo en un párrafo fluido
+        return "Structured summary: " + ". ".join(sentences) + "."
+
+    # ------------------------------------------------------------------
+    # Métodos antiguos (mantenidos por compatibilidad)
+    # ------------------------------------------------------------------
+
     def _render_structured(self, structured: Dict) -> str:
-        """
-        Renderiza y traduce las secciones estructuradas (ideas, métodos, resultados, aplicaciones).
-        """
         if not structured:
             return ""
         parts = []
@@ -562,7 +635,6 @@ class MarkdownRenderer:
         ):
             val = structured.get(key, "")
             if val:
-                # Traducir el contenido de la sección
                 translated_val = self._translation_svc.translate(val)
                 parts.append(f"  **{label}:** {translated_val}")
         return "\n".join(parts)
@@ -630,13 +702,29 @@ class MarkdownRenderer:
             f"| {fmt(profile.get('limitations'))} |"
         )
 
-    def _render_bibliography(self, bibliography: Dict[str, str]) -> str:
+    # ------------------------------------------------------------------
+    # BIBLIOGRAFÍA ENRIQUECIDA CON DOI Y CITATION COUNT
+    # ------------------------------------------------------------------
+
+    def _render_bibliography(self, bibliography: Dict[str, Dict]) -> str:
         header = "## Bibliografía completa\n\n"
         if not bibliography:
             return header + "No se encontraron evidencias con similitud suficiente.\n"
-        entries = sorted(bibliography.items(), key=lambda x: x[1].lower())
-        # Los títulos NO se traducen
-        lines = [f"- **{title}**  \n  (ID: `{doc_id}`)\n" for doc_id, title in entries]
+
+        entries = sorted(bibliography.items(), key=lambda x: x[1].get("title", "").lower())
+        lines = []
+        for doc_id, info in entries:
+            title = info.get("title", "Unknown")
+            doi = info.get("doi", "")
+            citation_count = info.get("citation_count", 0)
+
+            line = f"- **{title}**  \n  (ID: `{doc_id}`)"
+            if doi:
+                line += f", DOI: `{doi}`"
+            if citation_count:
+                line += f", Citas: {citation_count}"
+            lines.append(line + "\n")
+
         return header + "\n".join(lines)
 
     @staticmethod
@@ -658,8 +746,6 @@ class MarkdownRenderer:
 # ---------------------------------------------------------------------------
 
 class TrainingMaterialsPipeline:
-    """Builder → modelo de datos → Renderer → Markdown."""
-
     def __init__(
         self,
         builder: DocumentDataBuilder,
@@ -678,6 +764,8 @@ class TrainingMaterialsPipeline:
         candidate_concepts: Dict,
         concepts_with_tech: List[Dict],
         papers_text: Dict,
+        objectives_text: str,
+        metadata_lookup: Dict[str, Dict],
         output_file: Optional[Path] = None,
         cache_dir: Optional[Path] = None,
     ) -> str:
@@ -688,6 +776,8 @@ class TrainingMaterialsPipeline:
             candidate_concepts=candidate_concepts,
             concepts_with_tech=concepts_with_tech,
             papers_text=papers_text,
+            objectives_text=objectives_text,
+            metadata_lookup=metadata_lookup,
         )
         if cache_dir:
             self._translation_svc.save_cache()
@@ -743,6 +833,7 @@ def _load_optional(path: Path, default):
 def processTrainingMaterials() -> Optional[str]:
     input_dir, output_dir = inicioModulo("processTrainingMaterials")
 
+    # --- CARGAR DATOS ---
     findings_file = output_dir / "concept_findings.json"
     if not findings_file.exists():
         writeLog("error", logger, f"[TrainingMaterials] {findings_file} not found")
@@ -767,13 +858,35 @@ def processTrainingMaterials() -> Optional[str]:
         raw = _load_optional(papers_file, [])
         papers_text = {p["paper_id"]: p for p in raw if "paper_id" in p}
 
-    config = TrainingConfig.from_file(input_dir / "studyDescription.json")
+    # --- EXTRAER OBJETIVOS desde studyDescription.json ---
+    study_data = {}
+    study_file = input_dir / "studyDescription.json"
+    if study_file.exists():
+        study_data = _load_optional(study_file, {})
+    objectives = study_data.get("project", {}).get("objectives", [])
+    objectives_text = " ".join(objectives) if objectives else "No especificados."
 
-    # Instanciar servicio de traducción (caché en disco)
+    # --- EXTRAER METADATOS (DOI, citation_count) desde papers_metadata.json ---
+    metadata_file = output_dir / "papers_metadata.json"
+    metadata_lookup: Dict[str, Dict] = {}
+    if metadata_file.exists():
+        papers_metadata = _load_optional(metadata_file, [])
+        for p in papers_metadata:
+            if "paper_id" in p:
+                metadata_lookup[p["paper_id"]] = {
+                    "doi": p.get("doi", ""),
+                    "citation_count": p.get("citation_count", p.get("cited_by_count", 0)),
+                }
+
+    # --- CONFIG ---
+    config = TrainingConfig.from_file(study_file)
+
+    # --- TRADUCCIÓN ---
     cache_file = output_dir / config.translation_cache_file
     translation_svc = TranslationService(cache_file=cache_file)
     translation_svc.load_cache()
 
+    # --- PIPELINE ---
     pipeline = build_pipeline(config, translation_svc)
 
     return pipeline.run(
@@ -783,6 +896,8 @@ def processTrainingMaterials() -> Optional[str]:
         candidate_concepts=candidate,
         concepts_with_tech=concepts_with_tech,
         papers_text=papers_text,
+        objectives_text=objectives_text,
+        metadata_lookup=metadata_lookup,
         output_file=output_dir / "training_materials.md",
         cache_dir=output_dir,
     )

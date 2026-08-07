@@ -10,7 +10,7 @@ import os
 import sys
 import socket
 
-import torch
+
 from huggingface_hub import login
 
 # Constants for parameter files
@@ -22,7 +22,7 @@ def manageArgs():
     @Result: Returns parsed arguments as a Namespace object.
     """
     parser = argparse.ArgumentParser(description="Main process for Scientific Literature Intelligence Pipeline (SLIP) handling.")
-    parser.add_argument('--subject', type=str, help="Subject of investigation", default="sensores")
+    parser.add_argument('--subject', type=str, help="Subject of investigation: sensores, AERAprompt", default="AERAprompt")
     parser.add_argument('--proc', type=str, help="Process type: proc", default="SLIP")
 
     args = parser.parse_args()
@@ -35,6 +35,7 @@ def check_gpu(min_memory_gb=8.0):
     Logs details and sets processControl.hiper['device'] accordingly.
     Also sets CUDA_VISIBLE_DEVICES based on suitable GPUs.
     """
+    import torch
     suitable_gpus = []
     if torch.cuda.is_available():
         num_gpus = torch.cuda.device_count()
@@ -80,7 +81,7 @@ def setEnvironment():
     sys.pycache_prefix = cache
 
     min_memory = getattr(processControl.defaults, 'min_gpu_memory_gb', 6.0)  # Default 8GB; override in config
-    check_gpu(min_memory_gb=min_memory)
+
 
 
     if processControl.env['systemName'] == "PULSAR-PRO":
@@ -89,8 +90,11 @@ def setEnvironment():
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "12345"
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-        torch.cuda.set_per_process_memory_fraction(0.98, device=0)
-        torch.backends.cuda.max_split_size_mb = 64
+
+    import torch
+    torch.cuda.set_per_process_memory_fraction(0.98, device=0)
+    torch.backends.cuda.max_split_size_mb = 64
+    check_gpu(min_memory_gb=min_memory)
 
 
 def manageEnv():

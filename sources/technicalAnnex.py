@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from tqdm import tqdm
+
 from sources.common.common import logger, writeLog
 from sources.common.llm_client import LLMClient, create_resilient_ollama_client
 from sources.common.utils import inicioModulo
@@ -363,7 +365,7 @@ class TechnicalAnnexPipeline:
         writeLog("info", logger,
                  f"[TechnicalAnnex] Unique papers to process: {len(all_ids)}")
 
-        # --- 4. Extraer perfiles (con caché en memoria) ---
+        # --- 4. Extraer perfiles (con barra de progreso tqdm) ---
         profiles = self._process_papers(all_ids, text_lookup, title_lookup)
 
         # --- 5. Ensamblar resultado por concepto ---
@@ -395,28 +397,33 @@ class TechnicalAnnexPipeline:
         text_lookup: Dict[str, Dict],
         title_lookup: Dict[str, str],
     ) -> Dict[str, TechnicalProfile]:
-        """Procesa cada paper y devuelve un mapa paper_id → TechnicalProfile."""
+        """Procesa cada paper usando tqdm para mostrar progreso sin logs por ítem."""
         profiles: Dict[str, TechnicalProfile] = {}
         total = len(paper_ids)
 
-        for i, paper_id in enumerate(paper_ids, start=1):
-            paper = text_lookup.get(paper_id)
-            if not paper:
-                writeLog("warning", logger,
-                         f"[TechnicalAnnex] [{i}/{total}] Paper {paper_id} not found in papers_text.json")
-                profiles[paper_id] = TechnicalProfile(
-                    paper_id=paper_id, title="Not found", profile={}
-                )
-                continue
+        # Barra de progreso silenciosa: sin descripción larga, solo el contador
+        with tqdm(total=total, desc="Extrayendo perfiles técnicos", unit="paper") as pbar:
+            for paper_id in paper_ids:
+                paper = text_lookup.get(paper_id)
+                if not paper:
+                    writeLog("warning", logger,
+                             f"[TechnicalAnnex] Paper {paper_id} not found in papers_text.json")
+                    profiles[paper_id] = TechnicalProfile(
+                        paper_id=paper_id, title="Not found", profile={}
+                    )
+                    pbar.update(1)
+                    continue
 
-            title = title_lookup.get(paper_id, f"Untitled ({paper_id})")
-            writeLog("info", logger,
-                     f"[TechnicalAnnex] [{i}/{total}] Processing: {title[:60]}...")
+                title = title_lookup.get(paper_id, f"Untitled ({paper_id})")
 
-            profiles[paper_id] = self._extractor.extract(paper, paper_id, title)
+                # Extracción (sin log por paper)
+                profiles[paper_id] = self._extractor.extract(paper, paper_id, title)
 
-            if i < total and self._config.throttle_seconds > 0:
-                time.sleep(self._config.throttle_seconds)
+                # Pausa entre llamadas
+                if pbar.n < total and self._config.throttle_seconds > 0:
+                    time.sleep(self._config.throttle_seconds)
+
+                pbar.update(1)
 
         writeLog("info", logger,
                  f"[TechnicalAnnex] Processed {total} papers. "

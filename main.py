@@ -8,6 +8,8 @@ from sources.common.paramsManager import getConfigs
 
 def mainProcess():
     """
+
+
     from sources.normalizeSearchResults import processNormalizeSearchResults
     # -> wos_search.json + scopus_search.json
     processNormalizeSearchResults()
@@ -15,7 +17,7 @@ def mainProcess():
     from sources.searchMergeEngine import processSearchMergeEngine
     # [bbdd]_search.json .. -> canonical.json
     processSearchMergeEngine()
-
+    """
     from sources.rankingEngine import processRankingEngine
     # canonical.json + studyDescription.json -> ranked_papers.json
     processRankingEngine()
@@ -59,7 +61,7 @@ def mainProcess():
     # extrae evidencias (parrafos) de los papers seleccionados
     # aligned_concepts -> concept_evidence.json
     processConceptEvidence()
-    """
+
     from sources.clusterEvidences import processClusterEvidences
     # concept_evidence.json -> clustered_evidences.json
     processClusterEvidences()

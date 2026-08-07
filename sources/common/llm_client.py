@@ -40,8 +40,18 @@ Gestión del modo thinking (Qwen3, DeepSeek-R1, etc.):
                 de prosa en inglés antes del contenido en español esperado
                 y los elimina.
 
-  Defensa en profundidad (4 capas):
-    1. Proactiva  : /no_think en el system prompt (OllamaTransport)
+  Defensa en profundidad (5 capas):
+    0. Nativa     : think=False vía API de Ollama, si ollama-python lo
+                    soporta (detectado en runtime con _ollama_supports_think).
+                    Es el mecanismo MÁS FIABLE: actúa a nivel de motor y no
+                    depende de que la plantilla de chat del modelo reconozca
+                    ningún token especial. Si la librería instalada es
+                    antigua, se omite y se cae a la capa 1.
+    1. Proactiva  : /no_think en el system prompt (OllamaTransport).
+                    Capa de refuerzo / compatibilidad hacia atrás; algunas
+                    plantillas de Qwen3 solo reconocen este token en el
+                    turno de USUARIO, no en system, por lo que NO debe ser
+                    el único mecanismo de desactivación.
     2. Reactiva A : eliminar campo 'thinking' del dict (OllamaTransport)
     3. Reactiva B : regex 💭…🤔 (OllamaTransport + ResponseParser)
     4. Reactiva C : detección de prosa de razonamiento sin etiquetas
@@ -50,6 +60,7 @@ Gestión del modo thinking (Qwen3, DeepSeek-R1, etc.):
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from abc import ABC, abstractmethod
@@ -73,6 +84,27 @@ def _get_llm_defaults() -> Dict[str, Any]:
     return getattr(processControl, 'defaults', {}).get("llm", {})
 
 
+def _ollama_supports_think() -> bool:
+    """
+    Detecta en runtime si la versión instalada de ollama-python acepta el
+    parámetro nativo `think` en generate(). Introducido en ollama-python
+    ~0.4.x junto con el soporte de "thinking models" de Ollama server >= 0.6.
+
+    Se evalúa una sola vez (módulo cacheado) para no penalizar cada llamada.
+    Si la librería instalada es más antigua, devolvemos False y el
+    transporte cae de vuelta al único mecanismo disponible: el prefijo
+    textual `/no_think`.
+    """
+    try:
+        sig = inspect.signature(ollama.generate)
+        return "think" in sig.parameters
+    except (TypeError, ValueError):
+        return False
+
+
+_SUPPORTS_NATIVE_THINK = _ollama_supports_think()
+
+
 # ---------------------------------------------------------------------------
 # Capa 1 – Transporte
 # ---------------------------------------------------------------------------
@@ -88,6 +120,18 @@ class OllamaTransport(LLMTransport):
     Implementación concreta sobre Ollama.
     Gestiona las Formas A y B del thinking (ver docstring del módulo).
     La Forma C (prosa sin etiquetas) se gestiona en ResponseParser.
+
+    Desactivación del thinking — dos mecanismos en capas:
+      1. NATIVO (preferente): parámetro `think=False` de la API de Ollama
+         (ollama-python >= 0.4.x). Desactiva el razonamiento a nivel de
+         motor, independientemente de si la plantilla de chat del modelo
+         reconoce o no el token `/no_think` en el texto. Se activa solo
+         si `_ollama_supports_think()` lo detecta disponible.
+      2. TEXTUAL (refuerzo / compatibilidad hacia atrás): prefijo
+         `/no_think` en el system prompt. Se mantiene siempre como capa
+         adicional — no estorba si el mecanismo nativo ya está activo,
+         y es el único disponible en versiones antiguas de ollama-python
+         o de Ollama server (< 0.6).
     """
 
     _NO_THINK_PREFIX = "/no_think"
@@ -97,6 +141,12 @@ class OllamaTransport(LLMTransport):
     def __init__(self, model: str, suppress_thinking: bool = True) -> None:
         self.model = model
         self.suppress_thinking = suppress_thinking
+        self._use_native_think = suppress_thinking and _SUPPORTS_NATIVE_THINK
+        if suppress_thinking and not _SUPPORTS_NATIVE_THINK:
+            writeLog("warning", logger,
+                     f"[OllamaTransport:{model}] ollama-python instalado no soporta "
+                     f"el parámetro nativo 'think'. Usando solo el prefijo textual "
+                     f"'/no_think' (menos fiable). Actualiza con: pip install --upgrade ollama")
 
     def complete(self, prompt: str, system: Optional[str], options: Dict[str, Any]) -> str:
         kwargs: Dict[str, Any] = {
@@ -107,10 +157,26 @@ class OllamaTransport(LLMTransport):
         effective_system = self._build_system(system)
         if effective_system:
             kwargs["system"] = effective_system
+        if self._use_native_think:
+            kwargs["think"] = False
 
-        response = ollama.generate(**kwargs)
+        try:
+            response = ollama.generate(**kwargs)
+        except TypeError as exc:
+            # Salvaguarda: si la detección de firma falló (p.ej. wrapper/mock
+            # que no expone la firma real) y el server/cliente realmente no
+            # soporta 'think', reintentamos una vez sin él en vez de fallar
+            # toda la pasada de enriquecimiento.
+            if "think" in kwargs:
+                writeLog("warning", logger,
+                         f"[OllamaTransport:{self.model}] 'think' rechazado en runtime "
+                         f"({exc}); reintentando sin él.")
+                kwargs.pop("think")
+                response = ollama.generate(**kwargs)
+            else:
+                raise
 
-        # Forma A: Ollama >= 0.6 con think:true — el razonamiento viene en
+        # Forma A: Ollama >= 0.6 con think activo — el razonamiento viene en
         # un campo separado 'thinking'. Ignorarlo; usar sólo 'response'.
         raw = response.get("response", "").strip()
 

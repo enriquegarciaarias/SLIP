@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Set
@@ -22,7 +23,7 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from sources.common.common import logger, writeLog, processControl
+from sources.common.common import logger, writeLog
 from sources.common.llm_client import LLMClient, create_resilient_ollama_client
 from sources.common.utils import inicioModulo, read_json, write_json
 
@@ -60,6 +61,9 @@ class SynthesisConfig:
     # Nueva opción: incluir resumen estructurado en el prompt
     include_structured_context: bool = True
 
+    # Generar resúmenes narrativos por evidencia
+    generate_narrative_summaries: bool = True
+
     @classmethod
     def from_project_config(cls, project: Dict) -> "SynthesisConfig":
         s = project.get("synthesis", {})
@@ -78,6 +82,7 @@ class SynthesisConfig:
             min_singleton_score=s.get("min_singleton_score", 0.75),
             diversity_penalty=s.get("diversity_penalty", 0.20),
             include_structured_context=s.get("include_structured_context", True),
+            generate_narrative_summaries=s.get("generate_narrative_summaries", True),
         )
 
     @classmethod
@@ -160,7 +165,6 @@ class RawFinding:
     evidence_count: int
     avg_evidence_score: float
     top_quotes: Tuple[Dict, ...]
-    # NUEVO: resumen estructurado agregado de las evidencias
     structured_summary: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -192,7 +196,6 @@ class ConceptSynthesis:
     findings: Tuple[RawFinding, ...]
     all_evidences: Tuple[Dict, ...]
     all_papers: Tuple[str, ...]
-    # NUEVO: agregado global de todos los hallazgos
     aggregated_summary: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
@@ -308,12 +311,19 @@ class FindingGenerator:
         # Los top_quotes ya vienen con structured_evidence del módulo anterior
         top_quotes = []
         for ev in top_evs:
+            structured = ev.get("structured_evidence", {})
+            # Generar resumen narrativo si está activado
+            narrative_summary = ""
+            if self._cfg.generate_narrative_summaries:
+                narrative_summary = self._generate_narrative_summary(ev["text"], structured)
+
             top_quotes.append({
                 "text": ev["text"],
                 "doc_id": ev["doc_id"],
                 "paper_title": ev.get("paper_title", "Unknown"),
                 "similarity": ev["similarity"],
-                "structured_evidence": ev.get("structured_evidence", {}),
+                "structured_evidence": structured,
+                "narrative_summary": narrative_summary,   # NUEVO
             })
 
         style = force_style or self._cfg.finding_style
@@ -334,7 +344,7 @@ class FindingGenerator:
                 narrative=f"Evidence cluster ({cluster['size']} items) suggests: {ev_preview}..."
             )
 
-        # NUEVO: agregar resumen estructurado de las evidencias
+        # Agregar resumen estructurado de las evidencias
         structured_summary = self._aggregate_structured_fields(top_quotes)
 
         return RawFinding(
@@ -347,18 +357,82 @@ class FindingGenerator:
         )
 
     # ------------------------------------------------------------------
+    # NUEVO: Generación de resumen narrativo por evidencia
+    # ------------------------------------------------------------------
+
+    def _generate_narrative_summary(self, evidence_text: str, structured: Dict) -> str:
+        """
+        Genera un resumen narrativo en inglés (~300 palabras) que integra
+        TODOS los campos disponibles en `structured_evidence` (tanto las
+        secciones textuales — ideas, methods, results, applications — como
+        los metadatos — gap, evolutions, signals, models, metrics,
+        limitations, usage, solution).
+
+        La cita textual (`evidence_text`) se usa solo como ANCLA de contexto
+        (para que el LLM sepa de qué fragmento concreto del paper partió esta
+        evidencia y mantenga coherencia con su redacción), NO como el texto
+        a sintetizar. El contenido real a resumir es el `structured` completo,
+        que ya cubre todo el paper, no solo la cita.
+
+        Si falla, devuelve string vacío.
+        """
+        if not structured:
+            return ""
+
+        text_snippet = evidence_text[:600].replace('\n', ' ')
+        prompt = (
+            f"Below is structured information extracted from an academic paper, "
+            f"followed by a short verbatim quote from that same paper.\n\n"
+            f"Anchoring quote (use ONLY to ground tone/context — do NOT simply "
+            f"paraphrase this quote; it is a small excerpt, not the source to summarize):\n"
+            f"{text_snippet}\n\n"
+            f"Structured information extracted from the full paper "
+            f"(use ALL fields present — background, methods, results, "
+            f"applications/discussion, research gap, future work, signals, "
+            f"models, metrics, limitations, usage context, and proposed solution):\n"
+            f"{json.dumps(structured, indent=2)}\n\n"
+            f"Write a detailed, cohesive narrative summary in English (around 300 words) "
+            f"that integrates every structured field listed above which is present and "
+            f"non-empty. Do not omit any populated field. Do not literally name the "
+            f"fields (e.g. do not write 'ideas:' or 'methods:'); weave them into fluid "
+            f"prose instead. Do not use bullet points or numbered lists.\n\n"
+            f"Narrative summary:"
+        )
+        try:
+            raw = self._llm.generate_text(
+                prompt=prompt,
+                system_prompt=(
+                    "You are a research synthesis assistant. Produce a comprehensive, "
+                    "fluid narrative summary (around 300 words) that integrates the "
+                    "background/context, methodology, results, discussion/applications, "
+                    "research gap, future work, signals and models used, performance "
+                    "metrics, limitations, usage context, and proposed solution — based "
+                    "on the structured data provided. Use the quoted excerpt only as "
+                    "anchoring context, not as the primary content to paraphrase."
+                ),
+                temperature=0.4,
+                max_tokens=500,
+                context=f"summary_{hashlib.md5(evidence_text[:100].encode()).hexdigest()[:8]}"
+            )
+            return raw.strip()
+        except Exception as e:
+            writeLog("warning", logger, f"[FindingGenerator] Summary generation failed: {e}")
+            return ""
+
+    # ------------------------------------------------------------------
     # Agregación de campos estructurados
     # ------------------------------------------------------------------
 
     def _aggregate_structured_fields(self, top_quotes: List[Dict]) -> Dict[str, Any]:
         """
-        Agrega los campos estructurados de las evidencias (senales, modelos, métricas, etc.)
+        Agrega los campos estructurados de las evidencias.
         """
         signals: Set[str] = set()
         models: Set[str] = set()
         metrics: Dict[str, str] = {}
         limitations: List[str] = []
         applications: List[str] = []
+        solutions: List[str] = []
 
         for q in top_quotes:
             se = q.get("structured_evidence", {})
@@ -372,26 +446,26 @@ class FindingGenerator:
                 limitations.append(se["limitaciones"])
             if se.get("aplicacion"):
                 applications.append(se["aplicacion"])
+            if se.get("solucion"):
+                solutions.append(se["solucion"])
 
-        # Ordenar para consistencia
         return {
             "signals": sorted(signals),
             "models": sorted(models),
             "metrics": metrics,
             "limitations": "; ".join(limitations) if limitations else "",
             "application": "; ".join(applications) if applications else "",
+            "solution": "; ".join(solutions) if solutions else "",
         }
 
     @staticmethod
     def _aggregate_concept_summary(findings: Tuple[RawFinding, ...]) -> Dict[str, Any]:
-        """
-        Agrega los resúmenes de todos los hallazgos de un concepto.
-        """
         all_signals: Set[str] = set()
         all_models: Set[str] = set()
         all_metrics: Dict[str, str] = {}
         all_limitations: List[str] = []
         all_applications: List[str] = []
+        all_solutions: List[str] = []
 
         for f in findings:
             summary = f.structured_summary
@@ -405,6 +479,8 @@ class FindingGenerator:
                 all_limitations.append(summary["limitations"])
             if summary.get("application"):
                 all_applications.append(summary["application"])
+            if summary.get("solution"):
+                all_solutions.append(summary["solution"])
 
         return {
             "signals": sorted(all_signals),
@@ -412,6 +488,7 @@ class FindingGenerator:
             "metrics": all_metrics,
             "limitations": "; ".join(all_limitations) if all_limitations else "",
             "application": "; ".join(all_applications) if all_applications else "",
+            "solution": "; ".join(all_solutions) if all_solutions else "",
         }
 
     # ------------------------------------------------------------------
@@ -427,11 +504,9 @@ class FindingGenerator:
         style: Optional[str] = None,
     ) -> str:
         style = style or self._cfg.finding_style
-        # Obtener un resumen estructurado preliminar para incluir en el prompt
         top_evs = sorted(evidences, key=lambda e: e["similarity"], reverse=True)[:self._cfg.max_evidences_per_cluster]
         structured_ctx = ""
         if self._cfg.include_structured_context and top_evs:
-            # Usamos las primeras evidencias para armar un bloque de contexto estructurado
             signals_summary = self._extract_common_signals(top_evs)
             models_summary = self._extract_common_models(top_evs)
             if signals_summary or models_summary:
@@ -449,16 +524,14 @@ class FindingGenerator:
             return self._prompt_brief(concept_query, cluster, evidences, focus_terms, structured_ctx)
 
     def _extract_common_signals(self, evidences: List[Dict]) -> List[str]:
-        """Extrae señales comunes de las evidencias (para el prompt)."""
         all_s = set()
         for ev in evidences:
             se = ev.get("structured_evidence", {})
             for s in se.get("senales", []):
                 all_s.add(s)
-        return sorted(all_s)[:10]  # limitar
+        return sorted(all_s)[:10]
 
     def _extract_common_models(self, evidences: List[Dict]) -> List[str]:
-        """Extrae modelos comunes de las evidencias."""
         all_m = set()
         for ev in evidences:
             se = ev.get("structured_evidence", {})
@@ -715,7 +788,7 @@ class ClusterSplitter:
                 "suggested_theme": sub_evs[0]["text"][:150],
                 "papers": doc_ids,
                 "paper_titles": titles,
-                "evidences": sub_evs,  # Ya enriquecidas
+                "evidences": sub_evs,
             })
         return result if result else [cluster]
 
@@ -742,17 +815,10 @@ class ConceptSynthesizer:
         concept_data: Dict,
         focus_terms: List[str],
     ) -> ConceptSynthesis:
-        """
-        Sintetiza hallazgos para un concepto.
-
-        NOTA: concept_data debe venir de enriched_evidences.json
-              (con structured_evidence ya en las evidencias)
-        """
         concept_id = str(concept_data["concept_id"])
         concept_query = concept_data["concept_query"]
         clusters = concept_data.get("clusters", [])
 
-        # Preparar clusters (posible división)
         prepared_clusters: List[Dict] = []
         for cluster in clusters:
             if (self._cfg.max_cluster_size_for_split is not None
@@ -762,7 +828,6 @@ class ConceptSynthesizer:
             else:
                 prepared_clusters.append(cluster)
 
-        # Generar hallazgos
         raw_findings: List[RawFinding] = []
         for cluster in prepared_clusters:
             if cluster["size"] >= 2:
@@ -780,13 +845,9 @@ class ConceptSynthesizer:
                 if finding is not None:
                     raw_findings.append(finding)
 
-        # Filtrar por relevancia
         filtered_findings = self._filter.filter(raw_findings, concept_query, focus_terms)
 
-        # Agregar evidencias (ya vienen con structured_evidence)
         all_evidences = self._aggregate_evidences(clusters)
-
-        # NUEVO: agregar resumen estructurado global del concepto
         aggregated_summary = self._generator._aggregate_concept_summary(tuple(filtered_findings))
 
         writeLog("info", logger,
@@ -806,7 +867,6 @@ class ConceptSynthesizer:
         )
 
     def _aggregate_evidences(self, clusters: List[Dict]) -> List[Dict]:
-        """Agrega evidencias de todos los clusters (ya enriquecidas)."""
         evidences_by_key: Dict[Tuple, Dict] = {}
 
         for cluster in clusters:
@@ -828,17 +888,10 @@ class ConceptSynthesizer:
 
 
 # ---------------------------------------------------------------------------
-# Capa 6 – Pipeline principal (LÓGICA PURA, sin I/O)
+# Capa 6 – Pipeline principal
 # ---------------------------------------------------------------------------
 
 class SynthesisPipeline:
-    """
-    Pipeline de síntesis.
-
-    RESPONSABILIDAD: Transformar datos enriquecidos en hallazgos sintetizados.
-    NO hace I/O de archivos.
-    """
-
     def __init__(self, synthesizer: ConceptSynthesizer, config: SynthesisConfig) -> None:
         self._synthesizer = synthesizer
         self._cfg = config
@@ -848,16 +901,6 @@ class SynthesisPipeline:
         enriched_data: List[Dict],
         focus_terms: List[str],
     ) -> List[Dict]:
-        """
-        Ejecuta la síntesis sobre datos YA ENRIQUECIDOS.
-
-        Args:
-            enriched_data: Datos de enriched_evidences.json
-            focus_terms: Términos de foco
-
-        Returns:
-            Lista de diccionarios con los hallazgos sintetizados
-        """
         writeLog("info", logger,
                  f"[SynthesisPipeline] Generating findings for {len(enriched_data)} concepts...")
 
@@ -886,9 +929,8 @@ class SynthesisPipeline:
             writeLog("info", logger,
                      f"Concept {s.concept_id}: {s.concept_query[:60]} | "
                      f"{len(s.findings)} findings | {len(s.all_evidences)} evidences")
-            # Mostrar resumen estructurado
             agg = s.aggregated_summary
-            if agg.get("signals") or agg.get("models"):
+            if agg.get("signals") or agg.get("models") or agg.get("solution"):
                 writeLog("info", logger,
                          f"  Signals: {', '.join(agg.get('signals', [])[:5])}"
                          f"{' ...' if len(agg.get('signals', [])) > 5 else ''}")
@@ -898,6 +940,8 @@ class SynthesisPipeline:
                 if agg.get("metrics"):
                     metric_str = ", ".join(f"{k}: {v}" for k, v in agg.get("metrics", {}).items())[:100]
                     writeLog("info", logger, f"  Metrics: {metric_str}")
+                if agg.get("solution"):
+                    writeLog("info", logger, f"  Solution: {agg['solution'][:150]}...")
             for i, p in enumerate(previews):
                 writeLog("info", logger, f"  Finding {i+1}: {p}")
         writeLog("info", logger, sep)
@@ -912,20 +956,10 @@ def build_pipeline(
     llm_client: Optional[LLMClient] = None,
     registry: Optional[ModelRegistry] = None,
 ) -> SynthesisPipeline:
-    """
-    Construye el pipeline de síntesis.
-
-    NOTA: Si no se proporciona un registry externo, se crea uno pero
-          NO se carga automáticamente. El llamante debe asegurarse de
-          llamar a registry.load() antes de usar el pipeline.
-    """
     client = llm_client or create_resilient_ollama_client()
 
     if registry is None:
         registry = ModelRegistry(config.embedding_model_name)
-        # Intencionalmente NO llamamos a load() aquí.
-        # El llamante (processSynthesizeFindings) se encarga de cargarlo
-        # y así puede controlar el momento exacto de la carga pesada.
 
     generator = FindingGenerator(client, config)
     relevance_filter = RelevanceFilter(registry, config)
@@ -939,20 +973,13 @@ def build_pipeline(
 
 
 # ---------------------------------------------------------------------------
-# Función de entrada (Capa de orquestación: I/O + lógica)
+# Punto de entrada
 # ---------------------------------------------------------------------------
 
 def processSynthesizeFindings() -> Optional[List[Dict]]:
-    """
-    Punto de entrada - Orquesta: leer → procesar → escribir.
-
-    Lee: enriched_evidences.json, studyDescription.json
-    Escribe: concept_findings.json
-    """
     try:
         input_dir, output_dir = inicioModulo("processSynthesizeFindings")
 
-        # --- LECTURA (I/O) ---
         enriched_file = output_dir / "enriched_evidences.json"
         if not enriched_file.exists():
             raise FileNotFoundError(
@@ -965,7 +992,6 @@ def processSynthesizeFindings() -> Optional[List[Dict]]:
         focus_data = read_json(input_dir / "studyDescription.json")
         focus_terms = focus_data.get("project", {}).get("focus_terms", [])
 
-        # --- PROCESAMIENTO (lógica pura) ---
         registry = ModelRegistry(config.embedding_model_name)
         registry.load()
 
