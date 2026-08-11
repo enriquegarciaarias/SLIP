@@ -44,10 +44,60 @@ except ImportError:
 # CONFIG
 # --------------------------------------------------
 
+# --------------------------------------------------
+# CONFIG (valores por defecto; sobrescribibles desde config.json ->
+# processControl.defaults["discovery"], ver load_discovery_config())
+# --------------------------------------------------
+
 EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
-OFF_TOPIC_THRESHOLD = 0.30
+# Cribado de secciones (comportamiento original)
+SECTION_FILTER_THRESHOLD = 0.30
+SECTION_FILTER_ALPHA = 0.5
+# Filtro de conceptos off-topic: umbral base + ajuste dinámico por RQ que
+# garantiza al menos MIN_TOPICS_PER_RQ topics con MIN_PAPERS_PER_TOPIC papers
+OFF_TOPIC_THRESHOLD = 0.60
+OFF_TOPIC_ALPHA = 0.5
+MIN_TOPICS_PER_RQ = 2
+MIN_PAPERS_PER_TOPIC = 2
 N_SEED_TERMS = 30
 RELEVANT_SECTIONS = ["abstract", "introduction", "methodology", "results", "conclusion"]
+
+# Síntesis del contexto de estudio (ancla de similitud coseno)
+SYNTHESIS_MIN_TOKENS = 300
+SYNTHESIS_MAX_TOKENS = 600
+SYNTHESIS_MAX_CHARS = 4000
+
+
+def load_discovery_config() -> None:
+    """
+    Sobrescribe las constantes del módulo con la sección "discovery" de
+    config.json, accesible vía processControl.defaults (cargada en
+    sources/common/paramsManager.py -> manageDefaults()).
+    Los valores del fichero tienen prioridad; si faltan, se conservan
+    los valores por defecto definidos arriba.
+    """
+    defaults = getattr(processControl, "defaults", None) or {}
+    if not isinstance(defaults, dict):
+        defaults = {}
+    disc = defaults.get("discovery", {})
+    if not isinstance(disc, dict):
+        disc = {}
+
+    global EMBEDDING_MODEL, SECTION_FILTER_THRESHOLD, SECTION_FILTER_ALPHA, \
+        OFF_TOPIC_THRESHOLD, OFF_TOPIC_ALPHA, MIN_TOPICS_PER_RQ, MIN_PAPERS_PER_TOPIC, \
+        N_SEED_TERMS, SYNTHESIS_MIN_TOKENS, SYNTHESIS_MAX_TOKENS, SYNTHESIS_MAX_CHARS
+
+    EMBEDDING_MODEL = disc.get("embedding_model", EMBEDDING_MODEL)
+    SECTION_FILTER_THRESHOLD = float(disc.get("section_filter_threshold", SECTION_FILTER_THRESHOLD))
+    SECTION_FILTER_ALPHA = float(disc.get("section_filter_alpha", SECTION_FILTER_ALPHA))
+    OFF_TOPIC_THRESHOLD = float(disc.get("off_topic_threshold", OFF_TOPIC_THRESHOLD))
+    OFF_TOPIC_ALPHA = float(disc.get("off_topic_alpha", OFF_TOPIC_ALPHA))
+    MIN_TOPICS_PER_RQ = int(disc.get("min_topics_per_rq", MIN_TOPICS_PER_RQ))
+    MIN_PAPERS_PER_TOPIC = int(disc.get("min_papers_per_topic", MIN_PAPERS_PER_TOPIC))
+    N_SEED_TERMS = int(disc.get("n_seed_terms", N_SEED_TERMS))
+    SYNTHESIS_MIN_TOKENS = int(disc.get("synthesis_min_tokens", SYNTHESIS_MIN_TOKENS))
+    SYNTHESIS_MAX_TOKENS = int(disc.get("synthesis_max_tokens", SYNTHESIS_MAX_TOKENS))
+    SYNTHESIS_MAX_CHARS = int(disc.get("synthesis_max_chars", SYNTHESIS_MAX_CHARS))
 
 # UMAP / HDBSCAN
 UMAP_COMPONENTS = 8
@@ -121,6 +171,85 @@ def load_study_context(input_dir: Path) -> tuple[str, dict, list[str]]:
     if query_file.exists():
         with open(query_file, "r", encoding="utf-8") as f: concepts_query = json.load(f)
     return study_text, concepts_query, focus_terms
+
+
+def build_concepts_query_text(concepts_query: dict) -> str:
+    """Serializa los conceptos de conceptsQuery.json a texto plano para la síntesis."""
+    parts = []
+    for concept in concepts_query.get("concepts", []):
+        name = concept.get("name", "").strip()
+        query = concept.get("query", "").strip()
+        desc = concept.get("description", "").strip()
+        part = f"CONCEPT: {name}"
+        if query: part += f"\nQUERY: {query}"
+        if desc: part += f"\nDESCRIPTION: {desc}"
+        parts.append(part)
+    return "\n\n".join(parts)
+
+
+def synthesize_study_context(study_text: str, concepts_query: dict, focus_terms: list[str]) -> str:
+    """
+    Genera una síntesis en inglés del contexto de estudio (studyDescription +
+    conceptsQuery) para usarla como ancla de similitud coseno en el cribado.
+    Si el LLM no devuelve nada, concatena y trunca como fallback.
+    """
+    query_text = build_concepts_query_text(concepts_query)
+    combined = "\n\n".join(p for p in (study_text, query_text) if p).strip()
+
+    if not combined:
+        writeLog("warning", logger, "[Discovery] No study context available for synthesis.")
+        return study_text
+
+    try:
+        from sources.common.llm_client import create_resilient_ollama_client
+        llm = create_resilient_ollama_client(
+            temperature=0.0,
+            max_tokens=SYNTHESIS_MAX_TOKENS,
+        )
+    except Exception as exc:
+        writeLog("error", logger,
+                 f"[Discovery] LLM client init failed ({exc}). Falling back to concatenation+truncation.")
+        return combined[:SYNTHESIS_MAX_CHARS]
+
+    system_prompt = (
+        "You are a research project analyst. You will produce a compact English "
+        "synthesis of the research focus of a scientific literature review. "
+        "The synthesis is used ONLY as a cosine-similarity anchor to filter "
+        "relevant papers and concepts, so it must be self-contained, precise, "
+        "and keep the specific technical terms of the research queries."
+    )
+    prompt = (
+        "Read the study description and the research concepts below. "
+        f"Write a single-paragraph English synthesis between {SYNTHESIS_MIN_TOKENS} and "
+        f"{SYNTHESIS_MAX_TOKENS} tokens capturing: the overall goal of the project and each "
+        "specific research topic/query, preserving their key technical terms. "
+        "Do NOT include meta-commentary, lists, bullet points, or markdown. "
+        "Output only the synthesis text.\n\n"
+        "=== STUDY DESCRIPTION ===\n"
+        f"{study_text[:8000]}\n\n"
+        "=== RESEARCH CONCEPTS (conceptsQuery) ===\n"
+        f"{query_text[:12000]}"
+    )
+
+    try:
+        synthesis = llm.generate_text(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=0.0,
+            max_tokens=SYNTHESIS_MAX_TOKENS,
+            context="discoveryEngine.study_synthesis",
+        )
+        if synthesis and synthesis.strip():
+            writeLog("info", logger,
+                     f"[Discovery] Study synthesis generated ({len(synthesis.split())} words)")
+            return synthesis.strip()
+        writeLog("warning", logger,
+                 "[Discovery] LLM returned empty synthesis. Falling back to concatenation+truncation.")
+    except Exception as exc:
+        writeLog("error", logger,
+                 f"[Discovery] LLM synthesis failed ({exc}). Falling back to concatenation+truncation.")
+
+    return combined[:SYNTHESIS_MAX_CHARS]
 
 
 def extract_study_seeds(study_text: str, concepts_query: dict, focus_terms: list[str]) -> tuple[
@@ -200,7 +329,10 @@ def collect_candidate_sections(clean_corpus: list[dict], seed_terms: list[str], 
 
 def filter_sections_batch(candidates: List[Tuple[str, str, str]], study_embedding: np.ndarray,
                           focus_embedding: np.ndarray, embedding_model: SentenceTransformer,
-                          threshold: float = OFF_TOPIC_THRESHOLD, alpha: float = 0.5) -> List[Tuple[str, str, str]]:
+                          threshold: Optional[float] = None,
+                          alpha: Optional[float] = None) -> List[Tuple[str, str, str]]:
+    if threshold is None: threshold = SECTION_FILTER_THRESHOLD
+    if alpha is None: alpha = SECTION_FILTER_ALPHA
     if not candidates: return []
     texts = [c[2] for c in candidates]
     embeddings = embedding_model.encode(texts, normalize_embeddings=True, batch_size=32, show_progress_bar=False)
@@ -215,10 +347,23 @@ def filter_sections_batch(candidates: List[Tuple[str, str, str]], study_embeddin
 
 def filter_off_topic_concepts(concepts: list[dict], doc_topic_map: list[dict], embedding_model: SentenceTransformer,
                               study_embedding: np.ndarray, focus_embedding: np.ndarray = None,
-                              threshold: float = OFF_TOPIC_THRESHOLD, alpha: float = 0.5) -> tuple[
+                              threshold: Optional[float] = None, alpha: Optional[float] = None,
+                              min_topics: Optional[int] = None,
+                              min_papers: Optional[int] = None) -> tuple[
     list[dict], list[dict]]:
+    """
+    Filtra conceptos off-topic. El umbral se ajusta dinámicamente por llamada
+    (una por RQ) para garantizar que al menos `min_topics` topics con al menos
+    `min_papers` papers sobrevivan, sin subir nunca por encima del umbral base.
+    Los valores por defecto se resuelven en tiempo de llamada desde la
+    configuración (processControl.defaults["discovery"]).
+    """
+    if threshold is None: threshold = OFF_TOPIC_THRESHOLD
+    if alpha is None: alpha = OFF_TOPIC_ALPHA
+    if min_topics is None: min_topics = MIN_TOPICS_PER_RQ
+    if min_papers is None: min_papers = MIN_PAPERS_PER_TOPIC
     if study_embedding is None or not concepts: return concepts, doc_topic_map
-    kept, removed = [], []
+    scored = []
     for concept in concepts:
         topic_text = " ".join([concept.get("label", ""), " ".join(concept.get("keywords", [])[:10])])
         topic_embedding = embedding_model.encode(topic_text[:2000], normalize_embeddings=True)
@@ -226,10 +371,24 @@ def filter_off_topic_concepts(concepts: list[dict], doc_topic_map: list[dict], e
         similarity = alpha * sim_full + (1 - alpha) * float(
             np.dot(focus_embedding, topic_embedding)) if focus_embedding is not None else sim_full
         concept["study_similarity"] = round(similarity, 4)
-        if similarity >= threshold:
-            kept.append(concept)
-        else:
-            removed.append(concept)
+        scored.append(concept)
+    scored.sort(key=lambda c: c["study_similarity"], reverse=True)
+
+    valid = [c for c in scored if c.get("n_papers", 0) >= min_papers]
+    above_base = [c for c in valid if c["study_similarity"] >= threshold]
+
+    effective = threshold
+    if len(above_base) < min_topics:
+        if len(valid) >= min_topics:
+            effective = min(threshold, valid[min_topics - 1]["study_similarity"])
+        elif valid:
+            effective = min(threshold, valid[-1]["study_similarity"])
+        writeLog("warning", logger,
+                 f"[Discovery] Dynamic threshold lowered {threshold:.3f} -> {effective:.3f} "
+                 f"to keep at least {min_topics} valid topic(s)")
+
+    kept = [c for c in scored if c["study_similarity"] >= effective]
+    removed = [c for c in scored if c["study_similarity"] < effective]
     removed_ids = {c["concept_id"] for c in removed}
     return kept, [entry for entry in doc_topic_map if entry["topic"] not in removed_ids]
 
@@ -366,6 +525,7 @@ def fallback_concept_discovery(clean_corpus: list[dict], seed_terms: list[str], 
 # ENTRY POINT: ORQUESTADOR SLR ORIENTADO A PREGUNTAS
 # --------------------------------------------------
 def processDiscoveryEngine():
+    load_discovery_config()
     input_dir, output_dir = inicioModulo("processDiscoveryEngine")
     text_file = output_dir / "papers_text.json"
 
@@ -380,7 +540,10 @@ def processDiscoveryEngine():
     seed_terms, seed_topic_list = extract_study_seeds(study_text, concepts_query, focus_terms)
 
     embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-    study_embedding = embedding_model.encode(study_text[:4000], normalize_embeddings=True) if study_text else None
+    # Ancla de similitud coseno: síntesis de studyDescription + conceptsQuery
+    # (antes solo se usaban las objectives del studyDescription)
+    synthesis_text = synthesize_study_context(study_text, concepts_query, focus_terms)
+    study_embedding = embedding_model.encode(synthesis_text[:4000], normalize_embeddings=True) if synthesis_text else None
     focus_embedding = embedding_model.encode(" ".join(focus_terms), normalize_embeddings=True) if focus_terms else None
 
     # -----------------------------------------------------------------

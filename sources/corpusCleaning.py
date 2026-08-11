@@ -23,6 +23,23 @@ from pathlib import Path
 MIN_WORD_COUNT = 300  # Mínimo de palabras para considerar el paper útil
 MIN_CHAR_COUNT = 1500  # Mínimo de caracteres
 
+
+def load_corpus_cleaning_config() -> None:
+    """
+    Sobrescribe las constantes del módulo con la sección "corpusCleaning"
+    de config.json (processControl.defaults). Los valores del fichero tienen
+    prioridad; si faltan, se conservan los valores por defecto.
+    """
+    defaults = getattr(processControl, "defaults", None) or {}
+    cfg = defaults.get("corpusCleaning", {}) if isinstance(defaults, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    global MIN_WORD_COUNT, MIN_CHAR_COUNT
+    MIN_WORD_COUNT = int(cfg.get("min_word_count", MIN_WORD_COUNT))
+    MIN_CHAR_COUNT = int(cfg.get("min_char_count", MIN_CHAR_COUNT))
+
+
 # ==================================================
 # REGEX COMPILADAS (Limpieza de Corpus)
 # ==================================================
@@ -79,6 +96,7 @@ def clean_text_corpus(text: str) -> str:
 
 
 def processCorpusCleaning():
+    load_corpus_cleaning_config()
     input_dir, output_dir = inicioModulo("processCorpusCleaning")
 
     # -------------------------------------------------------------

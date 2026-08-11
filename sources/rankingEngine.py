@@ -32,6 +32,23 @@ TOP_K = 100
 MIN_TEXT_LENGTH = 20
 
 
+def load_ranking_config() -> None:
+    """
+    Sobrescribe las constantes del módulo con la sección "ranking" de
+    config.json (processControl.defaults). Los valores del fichero tienen
+    prioridad; si faltan, se conservan los valores por defecto.
+    """
+    defaults = getattr(processControl, "defaults", None) or {}
+    cfg = defaults.get("ranking", {}) if isinstance(defaults, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    global EMBEDDING_MODEL, TOP_K, MIN_TEXT_LENGTH
+    EMBEDDING_MODEL = cfg.get("embedding_model", EMBEDDING_MODEL)
+    TOP_K = int(cfg.get("top_k", TOP_K))
+    MIN_TEXT_LENGTH = int(cfg.get("min_text_length", MIN_TEXT_LENGTH))
+
+
 # --------------------------------------------------
 # MODEL — lazy loaded
 # CHANGED: was instantiated at module import time
@@ -175,6 +192,7 @@ def select_top_k(ranked_papers: list[dict], k: int = TOP_K) -> list[dict]:
 # --------------------------------------------------
 
 def processRankingEngine():
+    load_ranking_config()
     input_dir, output_dir = inicioModulo("processRankingEngine")
 
     # CHANGED: defensive file loading with descriptive errors, consistent

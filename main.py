@@ -8,7 +8,7 @@ from sources.common.paramsManager import getConfigs
 
 def mainProcess():
     """
-
+    """
 
     from sources.normalizeSearchResults import processNormalizeSearchResults
     # -> wos_search.json + scopus_search.json
@@ -17,7 +17,7 @@ def mainProcess():
     from sources.searchMergeEngine import processSearchMergeEngine
     # [bbdd]_search.json .. -> canonical.json
     processSearchMergeEngine()
-    """
+
     from sources.rankingEngine import processRankingEngine
     # canonical.json + studyDescription.json -> ranked_papers.json
     processRankingEngine()

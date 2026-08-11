@@ -35,6 +35,37 @@ MAX_DOCS_PER_CONCEPT = 60      # Tope de seguridad para no saturar el siguiente 
 MIN_RERANK_SCORE = 0.45         # Umbral de calidad mínimo para aceptar un documento
 
 
+def load_concept_alignment_config() -> None:
+    """
+    Sobrescribe las constantes del módulo con la sección "conceptAlignment"
+    de config.json (processControl.defaults). Los valores del fichero tienen
+    prioridad; si faltan, se conservan los valores por defecto.
+    """
+    defaults = getattr(processControl, "defaults", None) or {}
+    cfg = defaults.get("conceptAlignment", {}) if isinstance(defaults, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    global EMBEDDING_MODEL, TOP_K_ASSIGNMENTS, ALIGNMENT_SCORE_THRESHOLD, \
+        TOPIC_DOC_TEXT_LIMIT, TOPIC_DOCS_FOR_EMBEDDING, USE_ENHANCED_EMBEDDINGS, \
+        RERANK_PERCENTILE, MIN_DOCS_AFTER_RERANK, ALIGNMENT_SCORE_WEIGHT, \
+        RERANK_SCORE_WEIGHT, MIN_DOCS_PER_CONCEPT, MAX_DOCS_PER_CONCEPT, MIN_RERANK_SCORE
+
+    EMBEDDING_MODEL = cfg.get("embedding_model", EMBEDDING_MODEL)
+    TOP_K_ASSIGNMENTS = int(cfg.get("top_k_assignments", TOP_K_ASSIGNMENTS))
+    ALIGNMENT_SCORE_THRESHOLD = float(cfg.get("alignment_score_threshold", ALIGNMENT_SCORE_THRESHOLD))
+    TOPIC_DOC_TEXT_LIMIT = int(cfg.get("topic_doc_text_limit", TOPIC_DOC_TEXT_LIMIT))
+    TOPIC_DOCS_FOR_EMBEDDING = int(cfg.get("topic_docs_for_embedding", TOPIC_DOCS_FOR_EMBEDDING))
+    USE_ENHANCED_EMBEDDINGS = bool(cfg.get("use_enhanced_embeddings", USE_ENHANCED_EMBEDDINGS))
+    RERANK_PERCENTILE = int(cfg.get("rerank_percentile", RERANK_PERCENTILE))
+    MIN_DOCS_AFTER_RERANK = int(cfg.get("min_docs_after_rerank", MIN_DOCS_AFTER_RERANK))
+    ALIGNMENT_SCORE_WEIGHT = float(cfg.get("alignment_score_weight", ALIGNMENT_SCORE_WEIGHT))
+    RERANK_SCORE_WEIGHT = float(cfg.get("rerank_score_weight", RERANK_SCORE_WEIGHT))
+    MIN_DOCS_PER_CONCEPT = int(cfg.get("min_docs_per_concept", MIN_DOCS_PER_CONCEPT))
+    MAX_DOCS_PER_CONCEPT = int(cfg.get("max_docs_per_concept", MAX_DOCS_PER_CONCEPT))
+    MIN_RERANK_SCORE = float(cfg.get("min_rerank_score", MIN_RERANK_SCORE))
+
+
 # --------------------------------------------------
 # FUNCIONES AUXILIARES
 # --------------------------------------------------
@@ -248,10 +279,12 @@ def rerank_documents_with_concept(
     concept: dict,
     model: SentenceTransformer,
     focus_terms: list[str] = None,
-    percentile_threshold: int = RERANK_PERCENTILE,
-    min_docs: int = MIN_DOCS_AFTER_RERANK,
+    percentile_threshold: int = None,
+    min_docs: int = None,
     alignment_score: float = None
 ) -> list[tuple[dict, float]]:
+    if percentile_threshold is None: percentile_threshold = RERANK_PERCENTILE
+    if min_docs is None: min_docs = MIN_DOCS_AFTER_RERANK
     if not docs:
         return []
 
@@ -425,6 +458,7 @@ def build_aligned_concepts(
 # --------------------------------------------------
 
 def processConceptAlignment():
+    load_concept_alignment_config()
     input_dir, output_dir = inicioModulo("processConceptAlignment")
 
     corpus = load_corpus(output_dir)

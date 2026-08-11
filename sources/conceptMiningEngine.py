@@ -12,6 +12,24 @@ from keybert import KeyBERT
 TOP_K_KEYWORDS = 30
 NGRAM_RANGE = (1, 3)
 
+
+def load_concept_mining_config() -> None:
+    """
+    Sobrescribe las constantes del módulo con la sección "conceptMining"
+    de config.json (processControl.defaults). Los valores del fichero tienen
+    prioridad; si faltan, se conservan los valores por defecto.
+    """
+    defaults = getattr(processControl, "defaults", None) or {}
+    cfg = defaults.get("conceptMining", {}) if isinstance(defaults, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    global TOP_K_KEYWORDS, NGRAM_RANGE
+    TOP_K_KEYWORDS = int(cfg.get("top_k_keywords", TOP_K_KEYWORDS))
+    ngram = cfg.get("ngram_range", NGRAM_RANGE)
+    NGRAM_RANGE = tuple(ngram) if isinstance(ngram, (list, tuple)) else NGRAM_RANGE
+
+
 # Lazy loading: model loaded on first call
 _keybert_model: KeyBERT | None = None
 
@@ -259,6 +277,7 @@ def save_candidates(candidates: list, output_file: Path) -> None:
 
 
 def processConceptMiningEngine():
+    load_concept_mining_config()
     input_dir, output_dir = inicioModulo("processConceptMiningEngine")
     input_file = output_dir / "candidate_concepts.json"
     if not input_file.exists():

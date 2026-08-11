@@ -1,5 +1,5 @@
 # enrichmentEngine.py
-from sources.common.common import logger, writeLog
+from sources.common.common import logger, writeLog, processControl
 from sources.common.pdf_resolver import resolve_pdf_url
 from sources.common.utils import inicioModulo, read_json
 
@@ -29,6 +29,29 @@ MARGIN_BOTTOM = 60
 FONT = "Helvetica"
 FONT_SIZE = 10
 LINE_HEIGHT = 12
+
+
+def load_enrichment_config() -> None:
+    """
+    Sobrescribe las constantes del módulo con la sección "enrichment" de
+    config.json (processControl.defaults). Los valores del fichero tienen
+    prioridad; si faltan, se conservan los valores por defecto.
+    """
+    defaults = getattr(processControl, "defaults", None) or {}
+    cfg = defaults.get("enrichment", {}) if isinstance(defaults, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    global UNPAYWALL_EMAIL, TIMEOUT, SLEEP, MARGIN_LEFT, MARGIN_RIGHT, MARGIN_BOTTOM, FONT, FONT_SIZE, LINE_HEIGHT
+    UNPAYWALL_EMAIL = cfg.get("unpaywall_email", UNPAYWALL_EMAIL)
+    TIMEOUT = int(cfg.get("timeout", TIMEOUT))
+    SLEEP = float(cfg.get("sleep", SLEEP))
+    MARGIN_LEFT = int(cfg.get("margin_left", MARGIN_LEFT))
+    MARGIN_RIGHT = int(cfg.get("margin_right", MARGIN_RIGHT))
+    MARGIN_BOTTOM = int(cfg.get("margin_bottom", MARGIN_BOTTOM))
+    FONT = cfg.get("font", FONT)
+    FONT_SIZE = int(cfg.get("font_size", FONT_SIZE))
+    LINE_HEIGHT = int(cfg.get("line_height", LINE_HEIGHT))
 
 
 # --------------------------------------------------
@@ -346,6 +369,7 @@ def save_selected(selected: list, output_dir: Path) -> Path:
 # ENTRY POINT
 # --------------------------------------------------
 def processEnrichmentEngine():
+    load_enrichment_config()
     try:
         input_dir, output_dir = inicioModulo("processEnrichmentEngine")
         ranked_papers = read_json(output_dir / "ranked_papers.json")

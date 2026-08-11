@@ -72,6 +72,33 @@ MAX_THEME_KEYWORDS = 8  # Máximo de keywords extraídas por TF-IDF para pasar a
 THEME_MAX_TOKENS = 200  # ~120-150 palabras (3-4 frases descriptivas)
 
 
+def load_cluster_evidences_config() -> None:
+    """
+    Sobrescribe las constantes del módulo con la sección "clusterEvidences"
+    de config.json (processControl.defaults). Los valores del fichero tienen
+    prioridad; si faltan, se conservan los valores por defecto.
+    """
+    defaults = getattr(processControl, "defaults", None) or {}
+    cfg = defaults.get("clusterEvidences", {}) if isinstance(defaults, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    global EMBEDDING_MODEL, CLUSTER_THRESHOLDS, FOCUS_DENSITY_ADJUSTMENT, \
+        MERGE_SINGLETONS, MERGE_DISTANCE_THRESHOLD, LLM_THEME_GENERATION, \
+        MAX_THEME_KEYWORDS, THEME_MAX_TOKENS
+
+    EMBEDDING_MODEL = cfg.get("embedding_model", EMBEDDING_MODEL)
+    thresholds = cfg.get("cluster_thresholds", CLUSTER_THRESHOLDS)
+    if isinstance(thresholds, list):
+        CLUSTER_THRESHOLDS = [tuple(t) for t in thresholds if isinstance(t, (list, tuple))]
+    FOCUS_DENSITY_ADJUSTMENT = bool(cfg.get("focus_density_adjustment", FOCUS_DENSITY_ADJUSTMENT))
+    MERGE_SINGLETONS = bool(cfg.get("merge_singletons", MERGE_SINGLETONS))
+    MERGE_DISTANCE_THRESHOLD = float(cfg.get("merge_distance_threshold", MERGE_DISTANCE_THRESHOLD))
+    LLM_THEME_GENERATION = bool(cfg.get("llm_theme_generation", LLM_THEME_GENERATION))
+    MAX_THEME_KEYWORDS = int(cfg.get("max_theme_keywords", MAX_THEME_KEYWORDS))
+    THEME_MAX_TOKENS = int(cfg.get("theme_max_tokens", THEME_MAX_TOKENS))
+
+
 # --------------------------------------------------
 # FUNCIONES AUXILIARES
 # --------------------------------------------------
@@ -568,6 +595,7 @@ def print_cluster_report(summary: dict):
 # --------------------------------------------------
 
 def processClusterEvidences():
+    load_cluster_evidences_config()
     input_dir, output_dir = inicioModulo("processConceptEvidence")
     input_file = output_dir / "concept_evidence.json"
 
