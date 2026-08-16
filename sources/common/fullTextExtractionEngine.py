@@ -50,6 +50,27 @@ def _extract_sections(text):
     return sections
 
 
+def _extract_page_text(page) -> str:
+    """Extrae el texto de una página excluyendo el contenido de las tablas detectadas."""
+    tables = page.find_tables()
+    if not tables.tables:
+        return page.get_text()
+
+    table_bboxes = [fitz.Rect(t.bbox) for t in tables.tables]
+    blocks = page.get_text("blocks")
+    kept = []
+    for block in blocks:
+        x0, y0, x1, y1, text, _block_no, block_type = block
+        if block_type != 0:
+            continue
+        bbox = fitz.Rect(x0, y0, x1, y1)
+        if any(bbox.intersects(tb) for tb in table_bboxes):
+            continue
+        if text.strip():
+            kept.append(text.strip())
+    return "\n".join(kept)
+
+
 def extract_full_text_service(pdf_path: str) -> dict:
     """
     INTERFAZ PÚBLICA DEL SERVICIO.
@@ -66,7 +87,7 @@ def extract_full_text_service(pdf_path: str) -> dict:
         doc = fitz.open(pdf_path)
         pages = []
         for page in doc:
-            txt = page.get_text()
+            txt = _extract_page_text(page)
             if txt:
                 pages.append(txt)
         doc.close()

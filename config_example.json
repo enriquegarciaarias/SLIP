@@ -1,0 +1,96 @@
+{
+    "uid": "EGA",
+    "defaults": {
+      "huggingFaceToken": "REEMPLAZAR_CON_TU_TOKEN_DE_HUGGING_FACE",
+      "modelNames": {},
+      "search": {
+        "availables": ["wos", "scopus", "ieee", "pubmed"],
+        "wos": "wos_export.txt",
+        "scopus": "scopus_export.csv",
+        "ieee": "ieee_export.csv",
+        "pubmed": "pubmed_export.txt"
+      },
+      "llm": {
+        "primary_model": "qwen3:8b",
+        "fallback_model": ["qwen2.5:7b", "llama3.1:8b"],
+        "max_retries":1,
+        "temperature": 0.3,
+        "max_tokens": 800
+      },
+      "discovery": {
+        "embedding_model": "BAAI/bge-base-en-v1.5",
+        "section_filter_threshold": 0.30,
+        "section_filter_alpha": 0.5,
+        "off_topic_threshold": 0.60,
+        "off_topic_alpha": 0.5,
+        "min_topics_per_rq": 2,
+        "min_papers_per_topic": 2,
+        "n_seed_terms": 30,
+        "synthesis_min_tokens": 300,
+        "synthesis_max_tokens": 600,
+        "synthesis_max_chars": 4000
+      },
+      "ranking": {
+        "embedding_model": "BAAI/bge-base-en-v1.5",
+        "top_k": 100,
+        "min_text_length": 20
+      },
+      "enrichment": {
+        "unpaywall_email": "REEMPLAZAR_CON_TU_EMAIL",
+        "timeout": 20,
+        "sleep": 0.2,
+        "margin_left": 40,
+        "margin_right": 50,
+        "margin_bottom": 60,
+        "font": "Helvetica",
+        "font_size": 10,
+        "line_height": 12
+      },
+      "corpusCleaning": {
+        "min_word_count": 300,
+        "min_char_count": 1500
+      },
+      "conceptMining": {
+        "top_k_keywords": 30,
+        "ngram_range": [1, 3]
+      },
+      "conceptAlignment": {
+        "embedding_model": "BAAI/bge-large-en-v1.5",
+        "top_k_assignments": 3,
+        "alignment_score_threshold": 0.40,
+        "topic_doc_text_limit": 4000,
+        "topic_docs_for_embedding": 10,
+        "use_enhanced_embeddings": true,
+        "rerank_percentile": 60,
+        "min_docs_after_rerank": 5,
+        "alignment_score_weight": 0.3,
+        "rerank_score_weight": 0.7,
+        "min_docs_per_concept": 5,
+        "max_docs_per_concept": 60,
+        "min_rerank_score": 0.45
+      },
+      "clusterEvidences": {
+        "embedding_model": "BAAI/bge-base-en-v1.5",
+        "cluster_thresholds": [
+          [40, 0.38], [30, 0.36], [20, 0.34], [15, 0.32],
+          [10, 0.35], [6, 0.38], [3, 0.42], [0, 0.48]
+        ],
+        "focus_density_adjustment": false,
+        "merge_singletons": true,
+        "merge_distance_threshold": 0.50,
+        "llm_theme_generation": true,
+        "max_theme_keywords": 8,
+        "theme_max_tokens": 200
+      }
+    },
+    "environment": {
+        "realPath": "",
+        "models": "models",
+        "input": "results/input",
+        "output": "results/output",
+        "logs": "",
+        "cache": ".pycache"
+    },
+    "datasetVars": {},
+    "params": {}
+}

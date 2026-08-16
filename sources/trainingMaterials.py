@@ -550,6 +550,7 @@ class MarkdownRenderer:
         if not shown:
             return f"No hay evidencias con similitud ≥ {self._cfg.min_display_similarity}.\n"
 
+        rendered_narratives: set[str] = set()
         blocks = []
         for ev in shown:
             # Traducir el texto de evidencia (el fragmento entre comillas)
@@ -563,8 +564,14 @@ class MarkdownRenderer:
             )
 
             if ev.narrative_summary:
-                translated_summary = self._translation_svc.translate(ev.narrative_summary)
-                block += f"\n  *Resumen narrativo:* {translated_summary}\n"
+                # El resumen narrativo es a nivel de paper: se muestra solo la
+                # primera vez que aparece cada paper dentro de este bloque.
+                if ev.doc_id in rendered_narratives:
+                    block += "\n  *(Resumen narrativo del paper ya mostrado arriba)*\n"
+                else:
+                    rendered_narratives.add(ev.doc_id)
+                    translated_summary = self._translation_svc.translate(ev.narrative_summary)
+                    block += f"\n  *Resumen narrativo:* {translated_summary}\n"
             else:
                 structured_md = self._render_structured_fallback(ev.structured_evidence)
                 if structured_md:

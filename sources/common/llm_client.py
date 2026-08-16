@@ -148,12 +148,14 @@ class OllamaTransport(LLMTransport):
                      f"el parámetro nativo 'think'. Usando solo el prefijo textual "
                      f"'/no_think' (menos fiable). Actualiza con: pip install --upgrade ollama")
 
-    def complete(self, prompt: str, system: Optional[str], options: Dict[str, Any]) -> str:
+    def complete(self, prompt: str, system: Optional[str], options: Dict[str, Any], keep_alive: Any = None) -> str:
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,
             "options": options,
         }
+        if keep_alive is not None:
+            kwargs["keep_alive"] = keep_alive
         effective_system = self._build_system(system)
         if effective_system:
             kwargs["system"] = effective_system
@@ -232,11 +234,11 @@ class ConfigurableOllamaTransport(OllamaTransport):
         super().__init__(model, **kwargs)
         self._default_options = default_options or {}
 
-    def complete(self, prompt: str, system: Optional[str], options: Dict[str, Any]) -> str:
+    def complete(self, prompt: str, system: Optional[str], options: Dict[str, Any], keep_alive: Any = None) -> str:
         # Las opciones pasadas por el LLMClient tienen prioridad,
         # pero fusionamos las por defecto para este modelo específico.
         merged_options = {**self._default_options, **options}
-        return super().complete(prompt, system, merged_options)
+        return super().complete(prompt, system, merged_options, keep_alive=keep_alive)
 
 
 class FallbackTransport(LLMTransport):
@@ -252,13 +254,13 @@ class FallbackTransport(LLMTransport):
             raise ValueError("FallbackTransport requiere al menos un transporte")
         self.transports = transports
 
-    def complete(self, prompt: str, system: Optional[str], options: Dict[str, Any]) -> str:
+    def complete(self, prompt: str, system: Optional[str], options: Dict[str, Any], keep_alive: Any = None) -> str:
         last_error = None
 
         for i, transport in enumerate(self.transports):
             model_name = getattr(transport, 'model', f'model_{i}')
             try:
-                raw = transport.complete(prompt, system, options)
+                raw = transport.complete(prompt, system, options, keep_alive=keep_alive)
 
                 # Éxito: tiene contenido real
                 if raw and raw.strip():
@@ -471,11 +473,12 @@ class LLMClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         context: str = "",
+        keep_alive: Any = None,
     ) -> str:
         options = self._build_options(temperature, max_tokens)
         for attempt in self._retry.attempts():
             try:
-                raw = self._transport.complete(prompt, system_prompt, options)
+                raw = self._transport.complete(prompt, system_prompt, options, keep_alive=keep_alive)
                 cleaned = self._parser.clean_text(raw)
                 if cleaned:
                     return cleaned
@@ -495,13 +498,14 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         context: str = "",
         expect_array: bool = False,
+        keep_alive: Any = None,
     ) -> Union[Dict, List]:
         options = self._build_options(temperature, max_tokens)
         current_prompt = prompt
         empty: Union[Dict, List] = [] if expect_array else {}
 
         for attempt in self._retry.attempts():
-            raw = self._transport.complete(current_prompt, system_prompt, options)
+            raw = self._transport.complete(current_prompt, system_prompt, options, keep_alive=keep_alive)
             if not raw:
                 writeLog("warning", logger,
                          f"[LLMClient] Empty transport response (attempt {attempt + 1}) [{context}]")
@@ -529,9 +533,11 @@ class LLMClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         context: str = "",
+        keep_alive: Any = None,
     ) -> List[str]:
         result = self.generate_json(
-            prompt, system_prompt, temperature, max_tokens, context, expect_array=True
+            prompt, system_prompt, temperature, max_tokens, context, expect_array=True,
+            keep_alive=keep_alive,
         )
         if isinstance(result, list):
             return [str(item) for item in result]
@@ -545,9 +551,11 @@ class LLMClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         context: str = "",
+        keep_alive: Any = None,
     ) -> Optional[T]:
         json_data = self.generate_json(
-            prompt, system_prompt, temperature, max_tokens, context, expect_array=False
+            prompt, system_prompt, temperature, max_tokens, context, expect_array=False,
+            keep_alive=keep_alive,
         )
         if not json_data:
             writeLog("error", logger,

@@ -238,6 +238,7 @@ def synthesize_study_context(study_text: str, concepts_query: dict, focus_terms:
             temperature=0.0,
             max_tokens=SYNTHESIS_MAX_TOKENS,
             context="discoveryEngine.study_synthesis",
+            keep_alive=0,
         )
         if synthesis and synthesis.strip():
             writeLog("info", logger,

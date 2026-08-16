@@ -249,6 +249,58 @@ class ModelRegistry:
 
 
 # ---------------------------------------------------------------------------
+# Caché persistente de resúmenes narrativos por paper
+# ---------------------------------------------------------------------------
+
+class NarrativeCache:
+    """
+    Caché persistente de resúmenes narrativos por evidencia.
+
+    Clave: ``doc_id:md5(structured_evidence)``. Como la narrativa se genera
+    a partir del structured_evidence completo (nivel paper), el mismo paper
+    que aparece en varios hallazgos/conceptos reutiliza la misma narrativa:
+    ahorra llamadas LLM y garantiza consistencia entre apariciones.
+
+    Se persiste en JSON (p. ej. ``narrative_summaries.json``) para reutilizarla
+    entre ejecuciones. La clave incluye el hash del structured para invalidar
+    automáticamente entradas obsoletas si la extracción cambia.
+    """
+
+    def __init__(self, cache_file: Optional[Path] = None) -> None:
+        self._cache_file = cache_file
+        self._data: Dict[str, str] = {}
+        if cache_file and cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as fh:
+                    loaded = json.load(fh)
+                    if isinstance(loaded, dict):
+                        self._data = loaded
+            except (json.JSONDecodeError, OSError) as e:
+                writeLog("warning", logger,
+                         f"[NarrativeCache] Failed to load {cache_file}: {e}")
+
+    @staticmethod
+    def _key(doc_id: str, structured: Dict) -> str:
+        payload = json.dumps(structured, sort_keys=True, default=str).encode()
+        return f"{doc_id}:{hashlib.md5(payload).hexdigest()}"
+
+    def get(self, doc_id: str, structured: Dict) -> Optional[str]:
+        return self._data.get(self._key(doc_id, structured))
+
+    def set(self, doc_id: str, structured: Dict, narrative: str) -> None:
+        self._data[self._key(doc_id, structured)] = narrative
+
+    def save(self) -> None:
+        if self._cache_file is None:
+            return
+        self._cache_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._cache_file.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(self._data, fh, ensure_ascii=False, indent=2)
+        tmp.replace(self._cache_file)
+
+
+# ---------------------------------------------------------------------------
 # Capa 2 – Generador de hallazgos (SIN extracción, solo síntesis)
 # ---------------------------------------------------------------------------
 
@@ -276,9 +328,15 @@ class FindingGenerator:
         "Hallazgo:", "Finding:", "Síntesis:", "Respuesta:",
     )
 
-    def __init__(self, llm_client: LLMClient, config: SynthesisConfig) -> None:
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        config: SynthesisConfig,
+        narrative_cache: Optional[NarrativeCache] = None,
+    ) -> None:
         self._llm = llm_client
         self._cfg = config
+        self._narrative_cache = narrative_cache
 
     def generate(
         self,
@@ -312,10 +370,12 @@ class FindingGenerator:
         top_quotes = []
         for ev in top_evs:
             structured = ev.get("structured_evidence", {})
-            # Generar resumen narrativo si está activado
+            # Generar resumen narrativo si está activado (con caché por paper)
             narrative_summary = ""
             if self._cfg.generate_narrative_summaries:
-                narrative_summary = self._generate_narrative_summary(ev["text"], structured)
+                narrative_summary = self._cached_narrative_summary(
+                    ev["doc_id"], structured, ev["text"]
+                )
 
             top_quotes.append({
                 "text": ev["text"],
@@ -357,8 +417,25 @@ class FindingGenerator:
         )
 
     # ------------------------------------------------------------------
-    # NUEVO: Generación de resumen narrativo por evidencia
+    # NUEVO: Generación de resumen narrativo por evidencia (con caché)
     # ------------------------------------------------------------------
+
+    def _cached_narrative_summary(self, doc_id: str, structured: Dict, evidence_text: str) -> str:
+        """
+        Devuelve el resumen narrativo para una evidencia, reutilizando el de
+        la caché si ya existe para ese paper (misma clave doc_id + structured).
+        Si no existe, lo genera con el LLM y lo persiste en la caché.
+        """
+        if not structured:
+            return ""
+        if self._narrative_cache is not None:
+            cached = self._narrative_cache.get(doc_id, structured)
+            if cached:
+                return cached
+        narrative = self._generate_narrative_summary(evidence_text, structured)
+        if narrative and self._narrative_cache is not None:
+            self._narrative_cache.set(doc_id, structured, narrative)
+        return narrative
 
     def _generate_narrative_summary(self, evidence_text: str, structured: Dict) -> str:
         """
@@ -955,13 +1032,14 @@ def build_pipeline(
     config: SynthesisConfig,
     llm_client: Optional[LLMClient] = None,
     registry: Optional[ModelRegistry] = None,
+    narrative_cache: Optional[NarrativeCache] = None,
 ) -> SynthesisPipeline:
     client = llm_client or create_resilient_ollama_client()
 
     if registry is None:
         registry = ModelRegistry(config.embedding_model_name)
 
-    generator = FindingGenerator(client, config)
+    generator = FindingGenerator(client, config, narrative_cache=narrative_cache)
     relevance_filter = RelevanceFilter(registry, config)
     splitter = (
         ClusterSplitter(registry, config.max_cluster_size_for_split)
@@ -995,12 +1073,16 @@ def processSynthesizeFindings() -> Optional[List[Dict]]:
         registry = ModelRegistry(config.embedding_model_name)
         registry.load()
 
-        pipeline = build_pipeline(config, registry=registry)
+        cache_file = output_dir / "narrative_summaries.json"
+        narrative_cache = NarrativeCache(cache_file)
+
+        pipeline = build_pipeline(config, registry=registry, narrative_cache=narrative_cache)
         findings = pipeline.run(
             enriched_data=enriched_data,
             focus_terms=focus_terms,
         )
 
+        narrative_cache.save()
         write_json(output_dir / "concept_findings.json", findings)
         return findings
 
