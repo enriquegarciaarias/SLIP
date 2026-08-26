@@ -278,7 +278,7 @@ class FallbackTransport(LLMTransport):
                 writeLog("warning", logger,
                          f"[FallbackTransport] Error with model '{model_name}': {exc}. Switching...")
 
-        # Si agotamos todos los modelos, lanzamos el último error registrado
+        # Si se agotan todos los modelos, se lanza el último error registrado
         err_msg = "All models in FallbackTransport failed."
         if last_error:
             err_msg += f" Last error: {last_error}"

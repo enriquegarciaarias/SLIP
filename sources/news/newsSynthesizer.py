@@ -114,7 +114,7 @@ class NewsSynthesizer:
             }]
 
         # Intentar agrupar noticias en clusters (usando embeddings)
-        # Para simplificar, aquí generamos un solo hallazgo con las más relevantes
+        # Con el fin de simplificar, se genera un único hallazgo con los más relevantes
         top_news = news_items[:self._cfg.max_news_per_finding]
         context = "\n\n".join([f"Title: {n['title']}\nContent: {n['text'][:600]}" for n in top_news])
 

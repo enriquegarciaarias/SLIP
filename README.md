@@ -1,6 +1,11 @@
 # SLIP — Scientific Literature Intelligence Pipeline
 
-Pipeline secuencial de revisión de literatura que, partiendo de resultados de búsqueda
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+![DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.xxxxxx-blue)
+
+🔬 **Pipeline secuencial de revisión de literatura** que, partiendo de resultados de búsqueda
 bibliográfica, construye un corpus limpio, extrae evidencia estructurada por preguntas de
 investigación y genera documentos de síntesis (trabajo relacionado, materiales de formación,
 anexo técnico).
@@ -10,7 +15,7 @@ Para una descripción técnica del flujo (qué módulo consume y produce qué), 
 
 ---
 
-## 1. Requisitos previos
+## 📋 1. Requisitos previos
 
 - **Python 3.10+** (el proyecto se desarrolla con Python 3.12).
 - **GPU con CUDA** recomendada (≥ 8 GB VRAM) para los modelos de embeddings y LLM locales;
@@ -27,7 +32,7 @@ Para una descripción técnica del flujo (qué módulo consume y produce qué), 
 
 ---
 
-## 2. Instalación
+## ⚙️ 2. Instalación
 
 ```bash
 # 1. Crear y activar el entorno virtual
@@ -51,7 +56,7 @@ ollama list
 
 ---
 
-## 3. Configuración
+## 🛠️ 3. Configuración
 
 El repositorio no incluye el `config.json` real (contiene claves privadas). Debes **crearlo a
 partir del ejemplo**:
@@ -73,7 +78,7 @@ Luego editar `config.json`:
 
 ---
 
-## 4. Preparación del asunto de investigación
+## 📁 4. Preparación del asunto de investigación
 
 Cada estudio se organiza por un **subject** en `results/input/{subject}/` (p. ej. `sensores`):
 
@@ -117,7 +122,7 @@ Para incorporar PDFs "semilla" de forma manual:
 
 ---
 
-## 5. Ejecución
+## ▶️ 5. Ejecución
 
 ```bash
 source .venv/bin/activate
@@ -148,7 +153,7 @@ El pipeline es **semisecuencial** y en tres momentos requiere atención del usua
 
 ---
 
-## 6. Salidas principales
+## 📦 6. Salidas principales
 
 Todo se genera en `results/output/{subject}/`:
 
@@ -165,7 +170,7 @@ Logs: `ProcessLog.txt` (pipeline) y `Process.txt` (proceso).
 
 ---
 
-## 7. Notas y solución de problemas
+## 🛡️ 7. Notas y solución de problemas
 
 - **Ollama no responde:** asegúrate de que el servicio está levantado (`ollama serve`) y que
   los modelos de `config.json` están descargados (`ollama list`).

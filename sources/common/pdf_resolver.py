@@ -10,6 +10,7 @@ import re
 import time
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.exceptions import MaxRetryError
 from urllib3.util.retry import Retry
 from pathlib import Path
 from sources.common.common import logger, writeLog
@@ -24,13 +25,54 @@ MIN_PDF_SIZE = 10000
 ACL_DOI_PREFIX = "10.18653/"
 
 
+class _Skip429Retry(Retry):
+    """
+    Retry que NO reintenta HTTP 429 (rate-limit) y NO respeta la cabecera
+    `Retry-After`. Algunas APIs (p. ej. OpenAlex) devuelven 429 con
+    `Retry-After` de miles de segundos cuando agotan la cuota; honrarla
+    congelaría el pipeline durante horas (se quedaba "colgado").
+    """
+
+    def increment(
+        self,
+        method=None,
+        url=None,
+        response=None,
+        error=None,
+        _pool=None,
+        _stacktrace=None,
+        *args,
+        **kwargs,
+    ):
+        if response is not None and getattr(response, "status", None) == 429:
+            raise MaxRetryError(
+                _pool, url or "", "Rate limited (HTTP 429) — no retry"
+            )
+        return super().increment(
+            method=method,
+            url=url,
+            response=response,
+            error=error,
+            _pool=_pool,
+            _stacktrace=_stacktrace,
+            *args,
+            **kwargs,
+        )
+
+
 # --------------------------------------------------
 # INFRASTRUCTURE: Robust HTTP Client (Reutilizable)
 # --------------------------------------------------
 def _get_robust_session() -> requests.Session:
     """Crea una sesión con reintentos y cabeceras realistas contra bloqueos."""
     session = requests.Session()
-    retry = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+    retry = _Skip429Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504],
+        respect_retry_after_header=False,
+        allowed_methods=["GET"],
+    )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -123,7 +165,8 @@ def resolve_semantic_scholar(doi: str, title: str) -> str | None:
         time.sleep(SLEEP_BETWEEN)
         query = requests.utils.quote(title[:150])
         data = _get(f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&fields={fields}&limit=1")
-        if data and data.get("data"): return (data[0].get("openAccessPdf") or {}).get("url")
+        results = (data or {}).get("data") or []
+        if results: return (results[0].get("openAccessPdf") or {}).get("url")
     return None
 
 

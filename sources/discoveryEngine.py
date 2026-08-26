@@ -602,7 +602,7 @@ def processDiscoveryEngine():
             # FASE 2: SOFT FILTER (Embeddings)
             # FIX: Controlar la variable 'similarities' correctamente en ambas ramas
             # -----------------------------------------------------
-            selected_similarities = np.array([])  # Inicializamos por si falla todo
+            selected_similarities = np.array([])  # Inicializar por si se produce un fallo general
 
             if len(hard_filtered_indices) >= 10:
                 subset_texts = [full_texts[idx] for idx in hard_filtered_indices]

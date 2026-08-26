@@ -34,6 +34,12 @@ MIN_DOCS_PER_CONCEPT = 5       # Mínimo absoluto para poder analizar un concept
 MAX_DOCS_PER_CONCEPT = 60      # Tope de seguridad para no saturar el siguiente paso
 MIN_RERANK_SCORE = 0.45         # Umbral de calidad mínimo para aceptar un documento
 
+# --- Rigurosidad de conceptos emergentes ---
+# Similitud mínima (frente al ancla combinado studyDescription + conceptsQuery,
+# campo "study_similarity" de los conceptos descubiertos) que debe tener un
+# concepto emergente para ser incorporado/alineado. 0.0 = sin filtro (todo pasa).
+MIN_STUDY_SIMILARITY = 0.0
+
 
 def load_concept_alignment_config() -> None:
     """
@@ -49,7 +55,8 @@ def load_concept_alignment_config() -> None:
     global EMBEDDING_MODEL, TOP_K_ASSIGNMENTS, ALIGNMENT_SCORE_THRESHOLD, \
         TOPIC_DOC_TEXT_LIMIT, TOPIC_DOCS_FOR_EMBEDDING, USE_ENHANCED_EMBEDDINGS, \
         RERANK_PERCENTILE, MIN_DOCS_AFTER_RERANK, ALIGNMENT_SCORE_WEIGHT, \
-        RERANK_SCORE_WEIGHT, MIN_DOCS_PER_CONCEPT, MAX_DOCS_PER_CONCEPT, MIN_RERANK_SCORE
+        RERANK_SCORE_WEIGHT, MIN_DOCS_PER_CONCEPT, MAX_DOCS_PER_CONCEPT, MIN_RERANK_SCORE, \
+        MIN_STUDY_SIMILARITY
 
     EMBEDDING_MODEL = cfg.get("embedding_model", EMBEDDING_MODEL)
     TOP_K_ASSIGNMENTS = int(cfg.get("top_k_assignments", TOP_K_ASSIGNMENTS))
@@ -64,6 +71,7 @@ def load_concept_alignment_config() -> None:
     MIN_DOCS_PER_CONCEPT = int(cfg.get("min_docs_per_concept", MIN_DOCS_PER_CONCEPT))
     MAX_DOCS_PER_CONCEPT = int(cfg.get("max_docs_per_concept", MAX_DOCS_PER_CONCEPT))
     MIN_RERANK_SCORE = float(cfg.get("min_rerank_score", MIN_RERANK_SCORE))
+    MIN_STUDY_SIMILARITY = float(cfg.get("min_study_similarity", MIN_STUDY_SIMILARITY))
 
 
 # --------------------------------------------------
@@ -464,6 +472,26 @@ def processConceptAlignment():
     corpus = load_corpus(output_dir)
     discovered_concepts, objective_concepts = load_alignment_inputs(input_dir, output_dir)
 
+    # --- Filtro de rigurosidad: solo incorporar conceptos emergentes con alta
+    #     similitud frente al ancla combinado studyDescription + conceptsQuery. ---
+    if MIN_STUDY_SIMILARITY > 0:
+        before = len(discovered_concepts.get("concepts", []))
+        kept = [
+            c for c in discovered_concepts.get("concepts", [])
+            if (c.get("study_similarity") or 0.0) >= MIN_STUDY_SIMILARITY
+        ]
+        discovered_concepts["concepts"] = kept
+        dropped = before - len(kept)
+        if dropped > 0:
+            writeLog("warning", logger,
+                     f"[ConceptAlignment] Rigurosidad: {dropped}/{before} conceptos emergentes "
+                     f"descartados (study_similarity < {MIN_STUDY_SIMILARITY}). "
+                     f"Se incorporan {len(kept)}.")
+        else:
+            writeLog("info", logger,
+                     f"[ConceptAlignment] Rigurosidad: {len(kept)} conceptos emergentes pasan "
+                     f"el umbral study_similarity >= {MIN_STUDY_SIMILARITY}.")
+
     focus_terms = load_focus_terms(input_dir)
 
     writeLog("info", logger, f"[ConceptAlignment] Loading embedding model {EMBEDDING_MODEL}")
@@ -503,6 +531,7 @@ def processConceptAlignment():
         "rerank_percentile":    RERANK_PERCENTILE,
         "min_docs_after_rerank": MIN_DOCS_AFTER_RERANK,
         "min_rerank_score":     MIN_RERANK_SCORE,
+        "min_study_similarity": MIN_STUDY_SIMILARITY,
         "focus_terms_used":     bool(focus_terms),
         "score_combination":    {"alpha": ALIGNMENT_SCORE_WEIGHT, "beta": RERANK_SCORE_WEIGHT},
         "n_objective_concepts": len(objective_concepts["concepts"]),

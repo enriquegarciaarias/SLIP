@@ -72,7 +72,7 @@ def generate_related_work_section(concept_data: dict, metadata: dict, ref_counte
         avg_score = finding_data.get("avg_evidence_score", 0)
 
         # Crear lista de referencias numéricas (usamos doc_id como número, pero podemos mapear a números secuenciales)
-        # Para simplificar, usamos los doc_id originales (wos_xxx, scopus_xxx) como etiquetas.
+        # Con el fin de simplificar, se emplean los doc_id originales (wos_xxx, scopus_xxx) como etiquetas.
         # Pero para mejor presentación, podemos asignar números secuenciales.
         # Vamos a mantener los doc_id como etiquetas (ya que son cortos).
         citations = [f"[{pid}]" for pid in sorted(supporting_papers)]
@@ -125,7 +125,7 @@ This section synthesizes the state of the art across five key research questions
 
     # Generar secciones por concepto (orden 0 a 4)
     ordered_concepts = sorted(all_concepts, key=lambda x: x["concept_id"])
-    ref_counter = {}  # podría usarse para numeración secuencial
+    ref_counter = {}  # Podría emplearse para numeración secuencial
 
     for concept in ordered_concepts:
         doc += generate_related_work_section(concept, metadata, ref_counter)

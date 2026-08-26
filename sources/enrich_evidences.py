@@ -573,7 +573,7 @@ class PaperSectionExtractor:
         evolutions = self._extract_future_work(section_texts)
         solution = self._extract_solution(section_texts)
 
-        # 3. Extraer metadatos estructurados desde TODO el texto combinado
+        # 3. Extraer metadatos estructurados desde la totalidad del texto combinado
         combined_text = "\n".join(section_texts.values()) + "\n" + paper.get("clean_text", "")[:3000]
         signals = _extract_signals(combined_text, self._signal_set)
         models = _extract_models(combined_text, self._model_set)

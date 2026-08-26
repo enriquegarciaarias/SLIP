@@ -10,6 +10,7 @@ def mainProcess():
     """
     """
 
+
     from sources.normalizeSearchResults import processNormalizeSearchResults
     # -> wos_search.json + scopus_search.json
     processNormalizeSearchResults()
@@ -25,6 +26,10 @@ def mainProcess():
     from sources.enrichmentEngine import processEnrichmentEngine
     #  ranked_papers.json -> enriched_papers.json + candidate_review.json + selected_papers.json + review_original.pdf + review_es.pdf
     processEnrichmentEngine()
+
+    from sources.manualPapersScanner import processManualPapersScanner
+    # manual_papers.json (auto-detección de PDFs en input/{subject}/manual_papers/)
+    processManualPapersScanner()
 
     from sources.manualIngestion import processManualIngestion
     processManualIngestion()
@@ -69,6 +74,7 @@ def mainProcess():
     # clustered_evidences.json -> enriched_evidences.json
     from sources.enrich_evidences import processEnrichEvidences
     processEnrichEvidences()
+
 
     from sources.sythesizeFindings import processSynthesizeFindings
     # enriched_evidences.json -> concept_findings.json

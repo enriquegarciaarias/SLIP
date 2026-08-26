@@ -142,18 +142,69 @@ class SearchStrategyStats:
 
 
 @dataclass(frozen=True)
+class PrismaStats:
+    """Números del flujo PRISMA derivados directamente del pipeline."""
+    db_counts: Dict[str, int]
+    total_identified: int
+    duplicates_removed: int
+    after_dedup: int
+    records_screened: int
+    excluded_screening: int
+    sought_for_retrieval: int
+    not_retrieved: int
+    assessed_for_eligibility: int
+    included_in_concepts: int
+    excluded_not_in_concepts: int
+    excluded_emerging_only: int
+    excluded_no_concept: int
+    not_retrieved_papers: Tuple[Tuple[str, str], ...]      # (paper_id, title)
+    excluded_emerging_papers: Tuple[Tuple[str, str], ...]  # (paper_id, title)
+    excluded_no_concept_papers: Tuple[Tuple[str, str], ...]  # (paper_id, title)
+
+
+@dataclass(frozen=True)
 class DocumentModel:
     generated_at: str
     search_stats: SearchStrategyStats
+    prisma: PrismaStats
     concept_cards: Tuple[ConceptCard, ...]
     emerging_topics: Tuple[EmergingTopic, ...]
     technical_concepts: Tuple[Dict, ...]
-    bibliography: Dict[str, Dict]  # AHORA: doc_id -> {title, doi, citation_count}
+    bibliography: Dict[str, Dict]  # doc_id -> {title, doi, citation_count, bibtex, group}
 
 
 # ---------------------------------------------------------------------------
 # Capa 1 – Analizador de tópicos emergentes
 # ---------------------------------------------------------------------------
+
+def build_bibtex(paper_id: str, meta: Dict) -> str:
+    """
+    Genera una entrada BibTeX a partir de la metadata del pipeline.
+    paper_id se usa como clave de la entrada.
+    """
+    title = (meta.get("title") or paper_id).replace("{", "").replace("}", "")
+    authors = meta.get("authors") or []
+    year = meta.get("year")
+    venue = (meta.get("venue") or "").replace("{", "").replace("}", "")
+    doi = meta.get("doi") or ""
+
+    is_proceedings = bool(re.search(r"conference|symposium|workshop", venue, re.IGNORECASE))
+    entry_type = "@inproceedings" if is_proceedings else "@article"
+
+    lines = [f"{entry_type}{{{paper_id},"]
+    if authors:
+        lines.append(f"  author = {{{' and '.join(str(a) for a in authors)}}},")
+    lines.append(f"  title = {{{title}}},")
+    if year:
+        lines.append(f"  year = {{{year}}},")
+    if venue:
+        key = "booktitle" if is_proceedings else "journal"
+        lines.append(f"  {key} = {{{venue}}},")
+    if doi:
+        lines.append(f"  doi = {{{doi}}},")
+    lines.append("}")
+    return "\n".join(lines)
+
 
 class EmergingTopicAnalyzer:
     """
@@ -253,6 +304,7 @@ class DocumentDataBuilder:
         papers_text: Dict,
         objectives_text: str,                     # NUEVO
         metadata_lookup: Dict[str, Dict],         # NUEVO
+        prisma_raw: Dict,                         # NUEVO: conteos brutos para PRISMA
     ) -> DocumentModel:
         aligned_lookup = {
             str(ac.get("concept_id")): ac
@@ -267,14 +319,30 @@ class DocumentDataBuilder:
             concept_cards.append(self._build_concept_card(c_data, aligned_lookup))
         concept_cards = tuple(concept_cards)
 
+        included_ids = set()
+        for fd in findings_data:
+            included_ids.update(fd.get("all_papers", []))
+
         emerging_topics = self._build_emerging_topics(
             emergent_ids, candidate_concepts, papers_text
         )
-        bibliography = self._build_bibliography(concept_cards, metadata_lookup)
+
+        emerging_paper_ids = set()
+        for topic in emerging_topics:
+            emerging_paper_ids.update(topic.paper_ids)
+
+        bibliography = self._build_bibliography(
+            included_ids, emerging_paper_ids, metadata_lookup
+        )
+        prisma = self._build_prisma(
+            papers_text, candidate_concepts, included_ids, emerging_paper_ids,
+            prisma_raw, metadata_lookup,
+        )
 
         return DocumentModel(
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             search_stats=search_stats,
+            prisma=prisma,
             concept_cards=concept_cards,
             emerging_topics=emerging_topics,
             technical_concepts=tuple(concepts_with_tech),
@@ -395,24 +463,96 @@ class DocumentDataBuilder:
 
     @staticmethod
     def _build_bibliography(
-        cards: Tuple[ConceptCard, ...],
+        included_ids: set,
+        emerging_paper_ids: set,
         metadata_lookup: Dict[str, Dict],
     ) -> Dict[str, Dict]:
         """
-        Construye la bibliografía enriqueciendo cada paper con DOI y citation_count
-        desde metadata_lookup.
+        Construye la bibliografía con BibTeX, diferenciando:
+          - group="concept"  : papers que entran en los conceptos (incluidos).
+          - group="emerging" : papers que solo aparecen en conceptos emergentes.
         """
         bibliography: Dict[str, Dict] = {}
-        for card in cards:
-            for doc_id, title in card.represented_titles.items():
-                if doc_id not in bibliography:
-                    meta = metadata_lookup.get(doc_id, {})
-                    bibliography[doc_id] = {
-                        "title": title,
-                        "doi": meta.get("doi", ""),
-                        "citation_count": meta.get("citation_count", 0),
-                    }
+        for doc_id in sorted(included_ids):
+            meta = metadata_lookup.get(doc_id, {})
+            bibliography[doc_id] = {
+                "title": meta.get("title", doc_id),
+                "doi": meta.get("doi", ""),
+                "citation_count": meta.get("citation_count", 0),
+                "bibtex": build_bibtex(doc_id, meta),
+                "group": "concept",
+            }
+        for doc_id in sorted(emerging_paper_ids):
+            if doc_id in bibliography:
+                continue
+            meta = metadata_lookup.get(doc_id, {})
+            bibliography[doc_id] = {
+                "title": meta.get("title", doc_id),
+                "doi": meta.get("doi", ""),
+                "citation_count": meta.get("citation_count", 0),
+                "bibtex": build_bibtex(doc_id, meta),
+                "group": "emerging",
+            }
         return bibliography
+
+    @staticmethod
+    def _build_prisma(
+        papers_text: Dict,
+        candidate_concepts: Dict,
+        included_ids: set,
+        emerging_paper_ids: set,
+        prisma_raw: Dict,
+        metadata_lookup: Dict[str, Dict],
+    ) -> PrismaStats:
+        """
+        Deriva los números del flujo PRISMA a partir de los datos del pipeline.
+        prisma_raw: {"db_counts": {..}, "n_duplicates": int, "n_sought": int,
+                     "n_not_retrieved": int}
+        """
+        db_counts = prisma_raw.get("db_counts", {})
+        total_identified = sum(db_counts.values())
+        duplicates_removed = prisma_raw.get("n_duplicates", 0)
+        after_dedup = total_identified - duplicates_removed
+        records_screened = after_dedup
+        sought = prisma_raw.get("n_sought", 0)
+        excluded_screening = max(0, records_screened - sought)
+        not_retrieved = prisma_raw.get("n_not_retrieved", 0)
+        assessed = len(papers_text)
+        included = len(included_ids)
+        emerging_only = sorted(emerging_paper_ids - included_ids)
+        full_text_ids = set(papers_text.keys())
+        no_concept = sorted(full_text_ids - included_ids - emerging_paper_ids)
+
+        def _title(pid: str) -> str:
+            meta_title = metadata_lookup.get(pid, {}).get("title", "")
+            if meta_title:
+                return meta_title
+            paper = papers_text.get(pid)
+            return (paper or {}).get("title", "") or pid
+
+        not_retrieved_papers = [
+            (str(x.get("paper_id")), x.get("title") or "")
+            for x in prisma_raw.get("not_retrieved_papers", [])
+        ]
+
+        return PrismaStats(
+            db_counts=dict(db_counts),
+            total_identified=total_identified,
+            duplicates_removed=duplicates_removed,
+            after_dedup=after_dedup,
+            records_screened=records_screened,
+            excluded_screening=excluded_screening,
+            sought_for_retrieval=sought,
+            not_retrieved=not_retrieved,
+            assessed_for_eligibility=assessed,
+            included_in_concepts=included,
+            excluded_not_in_concepts=len(emerging_only) + len(no_concept),
+            excluded_emerging_only=len(emerging_only),
+            excluded_no_concept=len(no_concept),
+            not_retrieved_papers=tuple(not_retrieved_papers),
+            excluded_emerging_papers=tuple((pid, _title(pid)) for pid in emerging_only),
+            excluded_no_concept_papers=tuple((pid, _title(pid)) for pid in no_concept),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +581,8 @@ class MarkdownRenderer:
             [
                 self._render_header(model),
                 self._render_search_stats(model.search_stats),
+                "---\n",
+                self._render_prisma(model.prisma),
                 "---\n",
                 self._render_concept_summary(model.concept_cards),
                 "---\n",
@@ -473,6 +615,52 @@ class MarkdownRenderer:
             f"- **Umbral de relevancia:** {stats.relevance_threshold}\n"
             f"- **Mín. docs por concepto:** {stats.min_docs_after_rerank}\n"
             f"- **Focus terms:** {'Sí' if stats.focus_terms_used else 'No'}\n"
+        )
+
+    def _render_prisma(self, stats: PrismaStats) -> str:
+        db = ", ".join(f"{k}: {v}" for k, v in stats.db_counts.items())
+        return (
+            "## Flujo PRISMA (derivado del pipeline)\n\n"
+            "### Identificación\n"
+            f"- **Registros identificados en bases de datos:** {stats.total_identified} ({db})\n"
+            f"- **Duplicados eliminados:** {stats.duplicates_removed}\n"
+            f"- **Registros tras eliminación de duplicados:** {stats.after_dedup}\n\n"
+            "### Cribado y elegibilidad\n"
+            f"- **Registros cribados:** {stats.records_screened}\n"
+            f"- **Registros excluidos en el cribado:** {stats.excluded_screening}\n"
+            f"- **Publicaciones buscadas para su recuperación:** {stats.sought_for_retrieval}\n"
+            f"- **Publicaciones no recuperadas (restricciones de acceso):** {stats.not_retrieved}\n"
+            f"- **Publicaciones evaluadas para elegibilidad:** {stats.assessed_for_eligibility}\n\n"
+            "### Inclusión\n"
+            f"- **Estudios incluidos en conceptos:** {stats.included_in_concepts}\n"
+            f"- **Excluidos (no entran en conceptos):** {stats.excluded_not_in_concepts} "
+            f"(solo emergentes: {stats.excluded_emerging_only}, sin concepto: {stats.excluded_no_concept})\n\n"
+            "> Nota: los motivos de exclusión identificables automáticamente son duplicados entre "
+            "bases de datos y no recuperados por restricciones de acceso. El resto de motivos se "
+            "agrupará a posteriori.\n\n"
+            + self._render_prisma_annex(stats)
+        )
+
+    @staticmethod
+    def _render_prisma_annex(stats: PrismaStats) -> str:
+        """Anexo de apoyo al diagrama PRISMA: lista los papers excluidos y no recuperados."""
+        def _list(items: Tuple[Tuple[str, str], ...]) -> str:
+            if not items:
+                return "Ninguno.\n"
+            lines = []
+            for pid, title in sorted(items):
+                short = re.sub(r"\s+", " ", title)[:90]
+                lines.append(f"- `{pid}` — {short}")
+            return "\n".join(lines)
+
+        return (
+            "#### Anexo: papers no recuperados y excluidos\n\n"
+            f"**No recuperados — restricciones de acceso ({len(stats.not_retrieved_papers)}):**\n"
+            f"{_list(stats.not_retrieved_papers)}\n\n"
+            f"**Solo en conceptos emergentes ({len(stats.excluded_emerging_papers)}):**\n"
+            f"{_list(stats.excluded_emerging_papers)}\n\n"
+            f"**Sin concepto ni emergente ({len(stats.excluded_no_concept_papers)}):**\n"
+            f"{_list(stats.excluded_no_concept_papers)}\n"
         )
 
     def _render_concept_summary(self, cards: Tuple[ConceptCard, ...]) -> str:
@@ -623,11 +811,11 @@ class MarkdownRenderer:
         if not sentences:
             return ""
 
-        # Unir todo en un párrafo fluido
+        # Concatenar en un único párrafo coherente
         return "Structured summary: " + ". ".join(sentences) + "."
 
     # ------------------------------------------------------------------
-    # Métodos antiguos (mantenidos por compatibilidad)
+    # Métodos legados (mantenidos por compatibilidad)
     # ------------------------------------------------------------------
 
     def _render_structured(self, structured: Dict) -> str:
@@ -710,29 +898,42 @@ class MarkdownRenderer:
         )
 
     # ------------------------------------------------------------------
-    # BIBLIOGRAFÍA ENRIQUECIDA CON DOI Y CITATION COUNT
+    # BIBLIOGRAFÍA ENRIQUECIDA CON BIBTEX, DOI Y CITATION COUNT
     # ------------------------------------------------------------------
 
     def _render_bibliography(self, bibliography: Dict[str, Dict]) -> str:
-        header = "## Bibliografía completa\n\n"
+        header = "## Referencias\n\n"
         if not bibliography:
-            return header + "No se encontraron evidencias con similitud suficiente.\n"
+            return header + "No se encontraron referencias.\n"
 
-        entries = sorted(bibliography.items(), key=lambda x: x[1].get("title", "").lower())
+        concept = {k: v for k, v in bibliography.items() if v.get("group") == "concept"}
+        emerging = {k: v for k, v in bibliography.items() if v.get("group") != "concept"}
+
+        parts = [header]
+        parts.append(f"### Incluidos en conceptos ({len(concept)})")
+        parts.append(self._render_bib_group(concept))
+        parts.append(f"\n### Solo en conceptos emergentes ({len(emerging)})")
+        parts.append(self._render_bib_group(emerging))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _render_bib_group(entries: Dict[str, Dict]) -> str:
+        if not entries:
+            return "Ninguna.\n"
+        ordered = sorted(entries.items(), key=lambda x: x[1].get("title", "").lower())
         lines = []
-        for doc_id, info in entries:
-            title = info.get("title", "Unknown")
-            doi = info.get("doi", "")
-            citation_count = info.get("citation_count", 0)
-
-            line = f"- **{title}**  \n  (ID: `{doc_id}`)"
-            if doi:
-                line += f", DOI: `{doi}`"
-            if citation_count:
-                line += f", Citas: {citation_count}"
-            lines.append(line + "\n")
-
-        return header + "\n".join(lines)
+        for doc_id, info in ordered:
+            bibtex = info.get("bibtex", "")
+            if bibtex:
+                lines.append(f"```bibtex\n{bibtex}\n```")
+                continue
+            fallback = f"- **{info.get('title', 'Unknown')}**  \n  (ID: `{doc_id}`)"
+            if info.get("doi"):
+                fallback += f", DOI: `{info['doi']}`"
+            if info.get("citation_count"):
+                fallback += f", Citas: {info['citation_count']}"
+            lines.append(fallback + "\n")
+        return "\n\n".join(lines)
 
     @staticmethod
     def _render_footer() -> str:
@@ -773,6 +974,7 @@ class TrainingMaterialsPipeline:
         papers_text: Dict,
         objectives_text: str,
         metadata_lookup: Dict[str, Dict],
+        prisma_raw: Dict,
         output_file: Optional[Path] = None,
         cache_dir: Optional[Path] = None,
     ) -> str:
@@ -785,6 +987,7 @@ class TrainingMaterialsPipeline:
             papers_text=papers_text,
             objectives_text=objectives_text,
             metadata_lookup=metadata_lookup,
+            prisma_raw=prisma_raw,
         )
         if cache_dir:
             self._translation_svc.save_cache()
@@ -873,17 +1076,54 @@ def processTrainingMaterials() -> Optional[str]:
     objectives = study_data.get("project", {}).get("objectives", [])
     objectives_text = " ".join(objectives) if objectives else "No especificados."
 
-    # --- EXTRAER METADATOS (DOI, citation_count) desde papers_metadata.json ---
+    # --- EXTRAER METADATOS (DOI, citation_count, authors, year, venue) desde papers_metadata.json ---
     metadata_file = output_dir / "papers_metadata.json"
     metadata_lookup: Dict[str, Dict] = {}
+
+    # canonical.json aporta authors/venue/doi/title completos que papers_metadata no conserva
+    canonical_lookup: Dict[str, Dict] = {}
+    canonical_file = output_dir / "canonical.json"
+    if canonical_file.exists():
+        for p in _load_optional(canonical_file, []):
+            if "paper_id" in p:
+                canonical_lookup[p["paper_id"]] = p
+
     if metadata_file.exists():
         papers_metadata = _load_optional(metadata_file, [])
         for p in papers_metadata:
-            if "paper_id" in p:
-                metadata_lookup[p["paper_id"]] = {
-                    "doi": p.get("doi", ""),
-                    "citation_count": p.get("citation_count", p.get("cited_by_count", 0)),
-                }
+            if "paper_id" not in p:
+                continue
+            pid = p["paper_id"]
+            canon = canonical_lookup.get(pid, {})
+            metadata_lookup[pid] = {
+                "title": p.get("title") or canon.get("title", ""),
+                "doi": p.get("doi") or canon.get("doi", ""),
+                "citation_count": p.get("citation_count",
+                                        p.get("cited_by_count", canon.get("citation_count", 0))),
+                "authors": p.get("authors") or canon.get("authors", []),
+                "year": p.get("year") or canon.get("year"),
+                "venue": p.get("venue") or canon.get("venue", ""),
+                "keywords": p.get("keywords") or canon.get("keywords", []),
+            }
+
+    # --- CONTEOS PRISMA brutos derivados del pipeline ---
+    search_counts = {}
+    for db, fname in (("WoS", "wos_search.json"), ("Scopus", "scopus_search.json"),
+                      ("IEEE", "ieee_search.json"), ("PubMed", "pubmed_search.json")):
+        search_counts[db] = len(_load_optional(output_dir / fname, []))
+    canonical = _load_optional(output_dir / "canonical.json", [])
+    selected = _load_optional(output_dir / "selected_acquired.json",
+                              _load_optional(output_dir / "selected_papers.json", []))
+    missing = _load_optional(output_dir / "missing_pdfs.json", [])
+
+    prisma_raw = {
+        "db_counts": search_counts,
+        "n_duplicates": max(0, sum(search_counts.values()) - len(canonical)),
+        "n_sought": len(selected),
+        "n_not_retrieved": len(missing),
+        "not_retrieved_papers": [{"paper_id": m.get("paper_id"), "title": m.get("title", "")}
+                                 for m in missing],
+    }
 
     # --- CONFIG ---
     config = TrainingConfig.from_file(study_file)
@@ -905,6 +1145,7 @@ def processTrainingMaterials() -> Optional[str]:
         papers_text=papers_text,
         objectives_text=objectives_text,
         metadata_lookup=metadata_lookup,
+        prisma_raw=prisma_raw,
         output_file=output_dir / "training_materials.md",
         cache_dir=output_dir,
     )

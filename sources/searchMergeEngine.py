@@ -104,7 +104,7 @@ def merge_sources(sources_data: dict) -> list:
         }
 
         # Elegir el paper_id del primer elemento (todos representan el mismo paper)
-        # Podría mejorarse eligiendo el más completo, pero por simplicidad usamos el primero
+        # Podría mejorarse seleccionando el más completo; por simplicidad se utiliza el primero
         primary_paper_id = items[0]["paper_id"]
 
         merged[gid] = {

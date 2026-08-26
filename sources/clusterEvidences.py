@@ -622,7 +622,7 @@ def processClusterEvidences():
     writeLog("info", logger, "Cargando modelo de embeddings...")
     model = SentenceTransformer(EMBEDDING_MODEL)
 
-    # Crear UN SOLO cliente LLM para todo el módulo (reutilizar conexiones)
+    # Crear un único cliente LLM para el módulo (reutilizar conexiones)
     llm_client = None
     if LLM_THEME_GENERATION:
         from sources.common.llm_client import create_resilient_ollama_client

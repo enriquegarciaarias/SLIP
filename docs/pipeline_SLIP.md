@@ -1,10 +1,15 @@
 # Pipeline SLIP — Documentación de flujo
 
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Pipeline](https://img.shields.io/badge/Pipeline-SLIP-4A90D9)
+![Status](https://img.shields.io/badge/Documentation-Current-brightgreen)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 > **SLIP** (Scientific Literature Intelligence Pipeline): pipeline secuencial que, a partir de
 > resultados de búsqueda bibliográfica, produce un corpus limpio, evidencia estructurada por
 > preguntas de investigación y documentos de síntesis (trabajo relacionado, materiales de formación).
 
-## 1. Visión general
+## 📖 1. Visión general
 
 El pipeline se ejecuta como un **proceso secuencial**: cada módulo consume los ficheros de salida del
 módulo anterior y deja los suyos para el siguiente. La secuencia exacta está orquestada en
@@ -29,7 +34,7 @@ El flujo se configura con dos ficheros por "asunto" (subject) y uno global:
 
 ---
 
-## 2. Diagrama secuencial
+## 🔄 2. Diagrama secuencial
 
 ```
 [exports: wos/scopus/ieee/pubmed]
@@ -83,7 +88,7 @@ El flujo se configura con dos ficheros por "asunto" (subject) y uno global:
 
 ---
 
-## 3. Módulos (toma → deja)
+## 🧩 3. Módulos (toma → deja)
 
 ### 1. Normalización de resultados de búsqueda
 **Módulo:** `sources/normalizeSearchResults.py` · `processNormalizeSearchResults()`
@@ -253,7 +258,7 @@ por pregunta de investigación, con los DOI/metadatos de los papers involucrados
 
 ---
 
-## 4. Notas
+## 📝 4. Notas
 
 - **Extracción de texto:** el módulo `fullTextExtractionEngine.py` es un *servicio* reutilizable
   (no un paso del pipeline) usado por `corpusCleaning`. El `processFullTextExtraction` que aparece

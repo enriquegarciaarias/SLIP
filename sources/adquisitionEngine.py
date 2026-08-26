@@ -168,7 +168,7 @@ def manual_pdf_intervention(paper, pdf_dir, idx, total):
 # ==================================================
 # ORQUESTADOR PRINCIPAL (Con lógica de Vault)
 # ==================================================
-def archive_to_vault(target_file: Path, global_id: str, vault_dir: Path, inventory: dict):
+def archive_to_vault(target_file: Path, global_id: str, vault_dir: Path, inventory: dict, inventory_file: Path = None):
     """Mueve el archivo al vault, lo renombra con hash, y lo copia de vuelta al target."""
     vault_filename = get_vault_filename(global_id)
     vault_file = vault_dir / vault_filename
@@ -179,6 +179,13 @@ def archive_to_vault(target_file: Path, global_id: str, vault_dir: Path, invento
     shutil.copy2(str(vault_file), str(target_file))
     # Actualizar inventario en memoria
     inventory[global_id] = vault_filename
+    # Persistencia incremental: un corte posterior no pierde el índice
+    if inventory_file is not None:
+        try:
+            with open(inventory_file, "w", encoding="utf-8") as f:
+                json.dump(inventory, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            writeLog("warning", logger, f"  ⚠️ No se pudo persistir el inventario: {e}")
 
 
 def pdf_acquisition_engine(selected_papers, output_dir):
@@ -244,7 +251,7 @@ def pdf_acquisition_engine(selected_papers, output_dir):
             # Vault Dance: Guardar en vault y dejar copia en trabajo
             current_global_id = global_id or get_global_id(paper)
             if current_global_id:
-                archive_to_vault(target_file, current_global_id, vault_dir, inventory)
+                archive_to_vault(target_file, current_global_id, vault_dir, inventory, inventory_file)
 
             out_paper["local_pdf_path"] = str(target_file)
             out_paper["acquisition_status"] = "auto"
@@ -277,7 +284,7 @@ def pdf_acquisition_engine(selected_papers, output_dir):
                 # Vault Dance para el manual
                 current_global_id = global_id or get_global_id(paper)
                 if current_global_id:
-                    archive_to_vault(recovered_path, current_global_id, vault_dir, inventory)
+                    archive_to_vault(recovered_path, current_global_id, vault_dir, inventory, inventory_file)
 
                 out_paper["local_pdf_path"] = str(recovered_path)
                 out_paper["acquisition_status"] = "manual"
@@ -290,7 +297,7 @@ def pdf_acquisition_engine(selected_papers, output_dir):
                 output_papers.append(out_paper)
             print()
 
-    # Guardar el inventario actualizado al final de todo el proceso
+    # Guardar el inventario actualizado al término del proceso
     with open(inventory_file, "w", encoding="utf-8") as f:
         json.dump(inventory, f, indent=2, ensure_ascii=False)
 

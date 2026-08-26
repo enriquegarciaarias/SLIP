@@ -170,8 +170,8 @@ def extract_topic_keywords(topic_docs: list, focus_terms: list[str] = None) -> l
         # Sin embargo, podemos repetir el texto completo si sabemos que las secciones son importantes.
         # En su lugar, aplicamos un enfoque más simple: si el tópico tiene secciones relevantes
         # (metodología o resultados), ponderamos el texto completo con un factor.
-        # Para simplificar, usamos el texto tal cual, pero podríamos en el futuro
-        # usar la información de sections_used para ponderar.
+        # Con el fin de simplificar, se utiliza el texto tal cual; en el futuro podría ampliarse
+# para usar la información de sections_used y ponderar.
         weighted_texts.append(text)
 
     combined_text = "\n".join(weighted_texts)
@@ -259,6 +259,7 @@ def build_concept_candidates(
         concepts.append({
             "topic_id": topic_id,
             "topic_label": topic_label,
+            "study_similarity": topic.get("study_similarity"),
             "keywords": keywords,
             "documents": docs_for_topic
         })
