@@ -11,6 +11,9 @@ from keybert import KeyBERT
 
 TOP_K_KEYWORDS = 30
 NGRAM_RANGE = (1, 3)
+# Modelo de embeddings para KeyBERT. Se unifica con el resto del pipeline
+# (bge-base) para no mezclar espacios vectoriales distintos.
+EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
 
 
 def load_concept_mining_config() -> None:
@@ -24,10 +27,11 @@ def load_concept_mining_config() -> None:
     if not isinstance(cfg, dict):
         cfg = {}
 
-    global TOP_K_KEYWORDS, NGRAM_RANGE
+    global TOP_K_KEYWORDS, NGRAM_RANGE, EMBEDDING_MODEL
     TOP_K_KEYWORDS = int(cfg.get("top_k_keywords", TOP_K_KEYWORDS))
     ngram = cfg.get("ngram_range", NGRAM_RANGE)
     NGRAM_RANGE = tuple(ngram) if isinstance(ngram, (list, tuple)) else NGRAM_RANGE
+    EMBEDDING_MODEL = cfg.get("embedding_model", EMBEDDING_MODEL)
 
 
 # Lazy loading: model loaded on first call
@@ -37,7 +41,9 @@ _keybert_model: KeyBERT | None = None
 def _get_keybert() -> KeyBERT:
     global _keybert_model
     if _keybert_model is None:
-        _keybert_model = KeyBERT()
+        # KeyBERT(model=...) acepta un nombre de SentenceTransformer; usar el
+        # mismo espacio de embeddings que discovery/alignment/evidence/cluster.
+        _keybert_model = KeyBERT(model=EMBEDDING_MODEL)
     return _keybert_model
 
 

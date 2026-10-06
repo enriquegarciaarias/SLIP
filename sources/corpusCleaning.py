@@ -11,6 +11,8 @@ Responsabilidades:
 
 from sources.common.common import logger, processControl, writeLog
 from sources.common.fullTextExtractionEngine import extract_full_text_service  # <-- Importamos el servicio
+from sources.common.referenceFilter import strip_reference_tail
+from sources.common.pdfIndex import load_pdf_index, resolve_paper_pdf
 from sources.common.utils import inicioModulo
 
 import re
@@ -75,6 +77,10 @@ def clean_text_corpus(text: str) -> str:
         cut_pos = min(cut_pos, m.start())
     text = text[:cut_pos]
 
+    # Segundo corte robusto: encabezados de bibliografía inline (el texto
+    # puede venir sin saltos de línea tras la extracción del PDF).
+    text = strip_reference_tail(text)
+
     text = RE_COPYRIGHT.sub(" ", text)
     text = RE_ALL_RIGHTS.sub(" ", text)
     text = RE_PUNCTUATION_SPACE.sub(r"\1", text)
@@ -112,6 +118,11 @@ def processCorpusCleaning():
 
     writeLog("info", logger, f"[CLEAN] Leídos {len(acquired_papers)} papers de selected_acquired.json")
 
+    # Índice determinista paper_id -> PDF construido en la adquisición
+    pdf_index = load_pdf_index(output_dir)
+    if pdf_index:
+        writeLog("info", logger, f"[CLEAN] Índice de PDFs cargado: {len(pdf_index)} entradas")
+
     # -------------------------------------------------------------
     # 2. PROCESAMIENTO: Extracción + Limpieza + Filtrado
     # -------------------------------------------------------------
@@ -122,15 +133,16 @@ def processCorpusCleaning():
     for paper in acquired_papers:
         paper_id = paper.get("paper_id", "unknown")
         status = paper.get("acquisition_status")
-        pdf_path = paper.get("local_pdf_path")
+
+        # Asociación determinista vía índice (pdf_download_log.json);
+        # `local_pdf_path` queda como respaldo para ejecuciones antiguas.
+        pdf_file = resolve_paper_pdf(paper, output_dir, pdf_index)
 
         # Filtro de estado: Solo procesamos los que tienen PDF real
-        if status in [None, "missing", "pending"]:
-            continue
-
-        pdf_file = Path(pdf_path) if pdf_path else None
         if not pdf_file or not pdf_file.exists():
-            writeLog("warning", logger, f"[{paper_id}] PDF no encontrado en disco: {pdf_path}")
+            if status in [None, "missing", "pending"]:
+                continue
+            writeLog("warning", logger, f"[{paper_id}] PDF no encontrado en disco: {pdf_file}")
             continue
 
         writeLog("info", logger, f"[{paper_id}] Extrayendo y limpiando...")

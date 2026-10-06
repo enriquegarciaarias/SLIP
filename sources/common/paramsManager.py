@@ -24,6 +24,12 @@ def manageArgs():
     parser = argparse.ArgumentParser(description="Main process for Scientific Literature Intelligence Pipeline (SLIP) handling.")
     parser.add_argument('--subject', type=str, help="Subject of investigation: sensores, AERAprompt", default="AERASOA")
     parser.add_argument('--proc', type=str, help="Process type: proc", default="SLIP")
+    parser.add_argument('--manuscript', type=int, choices=[0, 1], default=None,
+                        help="1 = integra el manuscrito del investigador (manual_papers/manuscript/) "
+                             "y añade la sección de evidencias en training_materials. 0 = desactivado.")
+    parser.add_argument('--emergente', type=int, choices=[0, 1], default=None,
+                        help="0 = no desarrolla los conceptos emergentes en training_materials "
+                             "(se mantienen los conteos). 1 = se desarrollan (por defecto).")
 
     args = parser.parse_args()
     return args

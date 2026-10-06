@@ -25,7 +25,11 @@ from sentence_transformers import SentenceTransformer
 
 from sources.common.common import logger, writeLog
 from sources.common.llm_client import LLMClient, create_resilient_ollama_client
+from sources.common.referenceFilter import looks_like_reference
 from sources.common.utils import inicioModulo, read_json, write_json
+
+# Marcadores de cita inline en el texto sintetizado: [1], [2], ...
+_CITE_RE = re.compile(r"\[(\d+)\]")
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +169,7 @@ class RawFinding:
     evidence_count: int
     avg_evidence_score: float
     top_quotes: Tuple[Dict, ...]
+    citations: Dict[int, str] = field(default_factory=dict)
     structured_summary: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -182,6 +187,10 @@ class RawFinding:
             "evidence_count": self.evidence_count,
             "avg_evidence_score": self.avg_evidence_score,
             "top_quotes": list(self.top_quotes),
+            "citations": [
+                {"ref": ref, "doc_id": doc_id}
+                for ref, doc_id in sorted(self.citations.items())
+            ],
             "structured_summary": self.structured_summary,
         }
 
@@ -358,6 +367,21 @@ class FindingGenerator:
             RawFinding o None si el cluster no supera el umbral
         """
         evidences = cluster.get("evidences", [])
+
+        # Saneado de evidencias ANTES de sintetizar:
+        #   1. Descartar ventanas que son listas de referencias (no evidencia real).
+        #   2. Deduplicar por documento conservando la mejor evidencia de cada paper
+        #      (evita que un mismo paper pese varias veces y sobre-atribuir).
+        best_by_doc: Dict[str, Dict] = {}
+        for ev in evidences:
+            if not ev.get("text") or looks_like_reference(ev["text"]):
+                continue
+            doc = ev.get("doc_id")
+            prev = best_by_doc.get(doc)
+            if prev is None or ev.get("similarity", 0) > prev.get("similarity", 0):
+                best_by_doc[doc] = ev
+        evidences = list(best_by_doc.values())
+
         filtered = [e for e in evidences
                     if e.get("similarity", 0) >= self._cfg.min_evidence_score]
         if not filtered:
@@ -387,7 +411,10 @@ class FindingGenerator:
             })
 
         style = force_style or self._cfg.finding_style
-        prompt = self._build_prompt(concept_query, cluster, evidences, focus_terms, style)
+        # El prompt recibe EXACTAMENTE las mismas evidencias (top_evs) que se
+        # numeran como [1..n]; así los marcadores de cita del LLM se mapean de
+        # forma determinista a doc_id (top_evs[i-1]).
+        prompt = self._build_prompt(concept_query, cluster, top_evs, focus_terms, style)
         raw_text = self._llm.generate_text(
             prompt=prompt,
             system_prompt=self._SYSTEM_PROMPT,
@@ -399,22 +426,41 @@ class FindingGenerator:
         sections = self._parse_output(raw_text, style)
 
         if not sections.to_plain_text():
-            ev_preview = evidences[0]["text"][:200] if evidences else ""
+            ev_preview = top_evs[0]["text"][:200] if top_evs else ""
             sections = FindingSections(
                 narrative=f"Evidence cluster ({cluster['size']} items) suggests: {ev_preview}..."
             )
+
+        # Atribución a nivel de afirmación: mapear [n] -> doc_id.
+        citations = self._extract_citations(raw_text, top_evs)
 
         # Agregar resumen estructurado de las evidencias
         structured_summary = self._aggregate_structured_fields(top_quotes)
 
         return RawFinding(
             sections=sections,
-            supporting_papers=tuple(set(e["doc_id"] for e in evidences)),
+            supporting_papers=tuple(sorted({e["doc_id"] for e in top_evs})),
             evidence_count=cluster["size"],
             avg_evidence_score=cluster["avg_evidence_score"],
             top_quotes=tuple(top_quotes),
+            citations=citations,
             structured_summary=structured_summary,
         )
+
+    @staticmethod
+    def _extract_citations(text: str, evidences: List[Dict]) -> Dict[int, str]:
+        """
+        Extrae los marcadores [n] del texto y los mapea a doc_id.
+        Se descartan referencias fuera de rango (alucinadas por el LLM).
+        """
+        citations: Dict[int, str] = {}
+        if not text:
+            return citations
+        for match in _CITE_RE.finditer(text):
+            ref = int(match.group(1))
+            if 1 <= ref <= len(evidences):
+                citations[ref] = evidences[ref - 1]["doc_id"]
+        return citations
 
     # ------------------------------------------------------------------
     # NUEVO: Generación de resumen narrativo por evidencia (con caché)
@@ -513,18 +559,18 @@ class FindingGenerator:
 
         for q in top_quotes:
             se = q.get("structured_evidence", {})
-            for s in se.get("senales", []):
+            for s in se.get("signals", []):
                 signals.add(s)
-            for m in se.get("modelos", []):
+            for m in se.get("models", []):
                 models.add(m)
-            if "metricas" in se and isinstance(se["metricas"], dict):
-                metrics.update(se["metricas"])
-            if se.get("limitaciones"):
-                limitations.append(se["limitaciones"])
-            if se.get("aplicacion"):
-                applications.append(se["aplicacion"])
-            if se.get("solucion"):
-                solutions.append(se["solucion"])
+            if "metrics" in se and isinstance(se["metrics"], dict):
+                metrics.update(se["metrics"])
+            if se.get("limitations"):
+                limitations.append(se["limitations"])
+            if se.get("usage"):
+                applications.append(se["usage"])
+            if se.get("solution"):
+                solutions.append(se["solution"])
 
         return {
             "signals": sorted(signals),
@@ -604,7 +650,7 @@ class FindingGenerator:
         all_s = set()
         for ev in evidences:
             se = ev.get("structured_evidence", {})
-            for s in se.get("senales", []):
+            for s in se.get("signals", []):
                 all_s.add(s)
         return sorted(all_s)[:10]
 
@@ -612,7 +658,7 @@ class FindingGenerator:
         all_m = set()
         for ev in evidences:
             se = ev.get("structured_evidence", {})
-            for m in se.get("modelos", []):
+            for m in se.get("models", []):
                 all_m.add(m)
         return sorted(all_m)[:10]
 
@@ -628,6 +674,15 @@ class FindingGenerator:
     def _evidence_block(self, evidences: List[Dict]) -> str:
         return "\n".join(f"[{i+1}] {ev['text'][:600]}"
                          for i, ev in enumerate(evidences))
+
+    @staticmethod
+    def _citation_block() -> str:
+        """Instrucción de atribución a nivel de afirmación."""
+        return (
+            "Cite the evidence inline using its bracketed index (e.g. [1] or [2][3]) "
+            "right after each claim it supports. Every factual statement must include "
+            "at least one such citation, and you must use ONLY the indices provided.\n"
+        )
 
     def _prompt_structured(
         self,
@@ -651,6 +706,7 @@ class FindingGenerator:
             f"**Methodology:** [1-2 sentences on methodology/approach]\n\n"
             f"**Key results:** [2-3 sentences on concrete results, metrics, comparisons]\n\n"
             f"**Implications:** [1-2 sentences on applications, gaps, limitations]\n\n"
+            f"{self._citation_block()}"
             f"Rules: use only information from the evidence. "
             f"Keep technical terms in English. "
             f"If a section has no supporting evidence, write 'Not enough information provided.' "
@@ -677,6 +733,7 @@ class FindingGenerator:
             f"Based ONLY on the evidence above, write a cohesive paragraph in English "
             f"of approximately 180-220 words that synthesizes: the main contribution, "
             f"the methodological approach, the key results, and the practical implications.\n"
+            f"{self._citation_block()}"
             f"Keep technical terms in English. "
             f"Do not add preamble or meta-commentary. Start directly with the synthesis.\n\n"
             f"Synthesis:"
@@ -699,6 +756,7 @@ class FindingGenerator:
             f"Supporting evidences: {cluster['size']} "
             f"(avg quality: {cluster['avg_evidence_score']:.2f})\n\n"
             f"Evidence snippets:\n{self._evidence_block(evidences)}\n\n"
+            f"{self._citation_block()}"
             f"Write a concise summary (2-4 sentences) in English capturing the main contribution, "
             f"key findings, and practical implications.\n\nSummary:"
         )

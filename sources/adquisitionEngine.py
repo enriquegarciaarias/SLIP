@@ -1,6 +1,7 @@
 # processAcquisitionEngine.py
 from sources.common.common import logger, processControl, writeLog
 from sources.common.pdf_resolver import resolve_and_download
+from sources.common.pdfIndex import register_pdf, write_pdf_log
 from sources.common.utils import inicioModulo
 
 import json
@@ -205,6 +206,8 @@ def pdf_acquisition_engine(selected_papers, output_dir):
     downloaded, missing, manually_recovered = [], [], []
     # Esta será la salida limpia para el siguiente módulo
     output_papers = []
+    # Índice determinista paper_id -> pdf_file y log de eventos asociado
+    pdf_index, log_entries = {}, []
 
     for idx, paper in enumerate(selected_papers, start=1):
         out_paper = paper.copy()
@@ -216,6 +219,19 @@ def pdf_acquisition_engine(selected_papers, output_dir):
         out_paper.setdefault("acquisition_status", "pending")
 
         writeLog("info", logger, f"[{idx}/{len(selected_papers)}] Evaluating: {paper_id}...")
+
+        # -------------------------------------------------------------
+        # 0. PDF LOCAL YA DISPONIBLE (ingesta manual / manuscrito)
+        # -------------------------------------------------------------
+        local_path = out_paper.get("local_pdf_path")
+        if local_path and Path(local_path).exists():
+            writeLog("info", logger, f"  📁 PDF local detectado: {local_path}")
+            out_paper["acquisition_status"] = paper.get("acquisition_status") or "manual_local"
+            register_pdf(pdf_index, log_entries, paper_id, local_path,
+                         out_paper["acquisition_status"], output_dir)
+            downloaded.append({"paper_id": paper_id, "type": "local"})
+            output_papers.append(out_paper)
+            continue
 
         # -------------------------------------------------------------
         # 1. CACHE LOOKUP EN EL VAULT
@@ -233,6 +249,8 @@ def pdf_acquisition_engine(selected_papers, output_dir):
 
                 out_paper["local_pdf_path"] = str(target_file)
                 out_paper["acquisition_status"] = "cached_copy"
+                register_pdf(pdf_index, log_entries, paper_id, target_file,
+                             "cached_copy", output_dir)
                 downloaded.append({"paper_id": paper_id, "type": "cached_copy"})
                 output_papers.append(out_paper)
                 continue
@@ -255,6 +273,8 @@ def pdf_acquisition_engine(selected_papers, output_dir):
 
             out_paper["local_pdf_path"] = str(target_file)
             out_paper["acquisition_status"] = "auto"
+            register_pdf(pdf_index, log_entries, paper_id, target_file,
+                         "auto", output_dir)
             downloaded.append({"paper_id": paper_id, "type": "auto"})
             output_papers.append(out_paper)
             writeLog("info", logger, f"  ✅ Descargado y archivado: {target_filename}")
@@ -288,6 +308,8 @@ def pdf_acquisition_engine(selected_papers, output_dir):
 
                 out_paper["local_pdf_path"] = str(recovered_path)
                 out_paper["acquisition_status"] = "manual"
+                register_pdf(pdf_index, log_entries, paper_id, recovered_path,
+                             "manual", output_dir)
                 manually_recovered.append({"paper_id": paper_id, "type": "manual"})
                 output_papers.append(out_paper)
                 writeLog("info", logger, f"  🔄 Recuperado manualmente y archivado.")
@@ -300,6 +322,10 @@ def pdf_acquisition_engine(selected_papers, output_dir):
     # Guardar el inventario actualizado al término del proceso
     with open(inventory_file, "w", encoding="utf-8") as f:
         json.dump(inventory, f, indent=2, ensure_ascii=False)
+
+    # Persistir el índice determinista paper_id -> pdf_file
+    log_file = write_pdf_log(output_dir, pdf_index, log_entries)
+    writeLog("info", logger, f"🗂️  Índice paper_id -> PDF guardado en {log_file} ({len(pdf_index)} entradas)")
 
     return downloaded, missing, manually_recovered, output_papers
 
@@ -329,8 +355,8 @@ def processAcquisitionEngine():
     writeLog("info", logger, f"✅ Estado del pipeline guardado en {acquired_file}")
 
     # Logs de auditoría (Opcionales para el humano)
-    with open(output_dir / "pdf_download_log.json", "w", encoding="utf-8") as f:
-        json.dump(downloaded, f, indent=2, ensure_ascii=False)
+    # (pdf_download_log.json lo escribe pdf_acquisition_engine como índice
+    #  determinista paper_id -> pdf_file)
     with open(output_dir / "missing_pdfs.json", "w", encoding="utf-8") as f:
         json.dump(missing, f, indent=2, ensure_ascii=False)
 

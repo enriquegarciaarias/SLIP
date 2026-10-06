@@ -42,6 +42,7 @@ from sklearn.cluster import AgglomerativeClustering
 from spacy.lang.en import English
 
 from sources.common.common import logger, writeLog, processControl
+from sources.common.referenceFilter import strip_reference_tail
 from sources.common.utils import inicioModulo
 
 # ---------------------------------------------------------------------------
@@ -65,6 +66,11 @@ class ScoringConfig:
     claim_boost_factor: float = 0.05
     focus_term_boost: float = 0.15
     min_window_similarity: float = 0.05
+    # Los boosts léxicos son un ajuste fino: no pueden dominar el score
+    # semántico. Se acotan los aciertos y el boost total (≤ 25% del híbrido).
+    focus_max_hits: int = 3
+    claim_max_hits: int = 3
+    max_boost_ratio: float = 0.25
 
 
 @dataclass
@@ -414,13 +420,20 @@ class WindowScorer:
     ) -> float:
         c = self._cfg
         hybrid = c.embedding_weight * max_sim + c.bm25_weight * bm25_norm
-        claim = TextUtils.claim_score(window_text, [])
-        final = hybrid + c.claim_boost_factor * claim
 
+        # Coincidencias de "claim" (frases de resultado) acotadas.
+        claim = TextUtils.claim_score(window_text, [])
+        boost = c.claim_boost_factor * min(claim, c.claim_max_hits)
+
+        # Coincidencias de términos de foco acotadas.
         if focus_terms:
             lower = window_text.lower()
             hits = sum(1 for t in focus_terms if t.lower() in lower)
-            final += hits * c.focus_term_boost
+            boost += c.focus_term_boost * min(hits, c.focus_max_hits)
+
+        # El boost total nunca supera una fracción del score semántico, para
+        # que la selección siga siendo semántica y no por keyword-stuffing.
+        final = hybrid + min(boost, c.max_boost_ratio * hybrid)
 
         return final
 
@@ -564,6 +577,8 @@ class DocumentEvidenceExtractor:
         (una vez por concepto) y se reutilizan para todos los documentos.
         """
         text = document.get("text", "")
+        # Defensivo: nunca generar ventanas de evidencia sobre bibliografía.
+        text = strip_reference_tail(text)
         sentences = TextUtils.split_sentences(text, self._registry.nlp)
 
         if len(sentences) < self._cfg.window.min_sentences:

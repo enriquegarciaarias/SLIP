@@ -195,15 +195,25 @@ def enrich_paper(paper: dict) -> dict:
     title = paper.get("title", "")
     resolution = resolve_pdf_url(doi or "", title)
 
+    # No destruir metadatos de la fuente con un None de OpenAlex/resolution.
+    citation_count = oa_meta.get("citation_count")
+    if citation_count is None:
+        citation_count = paper.get("citation_count")
+
+    publication_year = oa_meta.get("publication_year") or paper.get("year")
+
+    pdf_url = resolution["pdf_url"] or paper.get("pdf_url")
+    pdf_source = resolution["pdf_source"] or paper.get("pdf_source")
+
     return {
         **paper,
-        "citation_count": oa_meta.get("citation_count"),
-        "openalex_id": oa_meta.get("openalex_id"),
-        "publication_year": oa_meta.get("publication_year"),
-        "is_oa": oa_meta.get("is_oa"),
-        "pdf_url": resolution["pdf_url"],
-        "pdf_source": resolution["pdf_source"],
-        "has_pdf": resolution["pdf_url"] is not None,
+        "citation_count": citation_count,
+        "openalex_id": oa_meta.get("openalex_id") or paper.get("openalex_id"),
+        "publication_year": publication_year,
+        "is_oa": oa_meta.get("is_oa") if oa_meta.get("is_oa") is not None else paper.get("open_access"),
+        "pdf_url": pdf_url,
+        "pdf_source": pdf_source,
+        "has_pdf": pdf_url is not None,
         "selected": False,
     }
 
@@ -253,14 +263,26 @@ def build_candidate_review(enriched_papers: list) -> list:
     review = [
         {
             "paper_id": p.get("paper_id"),
+            "global_id": p.get("global_id"),
+            "source": p.get("source"),
+            "sources": p.get("sources"),
             "title": p.get("title"),
             "abstract": p.get("abstract"),
+            "authors": p.get("authors"),
+            "venue": p.get("venue"),
+            "document_type": p.get("document_type"),
+            "language": p.get("language"),
             "keywords": p.get("keywords"),
             "year": p.get("year"),
             "citation_count": p.get("citation_count"),
             "relevance_score": p.get("relevance_score"),
             "is_oa": p.get("is_oa"),
+            "oa_url": p.get("oa_url"),
             "doi": p.get("doi"),
+            "pmid": p.get("pmid"),
+            "pmcid": p.get("pmcid"),
+            "references_count": p.get("references_count"),
+            "landing_page": p.get("landing_page"),
             "pdf_url": p.get("pdf_url"),
             "pdf_source": p.get("pdf_source"),
             "has_pdf": p.get("has_pdf", False),
@@ -283,6 +305,37 @@ def build_candidate_review(enriched_papers: list) -> list:
 # INTERACTIVE SELECTION
 # --------------------------------------------------
 
+def refresh_selection_from_review(selected: list, rejected: list, review: list):
+    """
+    Reconstruye las listas (selected, rejected) a partir del ranking ACTUAL.
+
+    El checkpoint debe aportar solo las DECISIONES (paper_id), no los metadatos
+    de ejecuciones anteriores. Al reanudar, se sustituye el payload de cada
+    paper por el del ranking actual, evitando arrastrar datos obsoletos (p. ej.
+    DOIs corregidos o metadatos enriquecidos con posterioridad). Los ids que ya
+    no están en el ranking se descartan y se reportan.
+
+    Returns:
+        (selected, rejected, stale_ids)
+    """
+    review_by_id = {p["paper_id"]: p for p in review}
+
+    def _refresh(entries: list, flag: bool):
+        refreshed, stale = [], []
+        for entry in entries:
+            fresh = review_by_id.get(entry.get("paper_id"))
+            if fresh is None:
+                stale.append(entry.get("paper_id"))
+                continue
+            fresh["selected"] = flag
+            refreshed.append(fresh)
+        return refreshed, stale
+
+    selected, stale_sel = _refresh(selected, True)
+    rejected, stale_rej = _refresh(rejected, False)
+    return selected, rejected, stale_sel + stale_rej
+
+
 def interactive_selection(review: list, output_dir: Path) -> tuple[list, list]:
     """
     Selección interactiva de papers.
@@ -299,6 +352,13 @@ def interactive_selection(review: list, output_dir: Path) -> tuple[list, list]:
     selected = state["selected"]
     rejected = state["rejected"]
     start_idx = state["last_index"]
+
+    # Refrescar payloads desde el ranking actual (ver docstring del helper).
+    selected, rejected, stale = refresh_selection_from_review(selected, rejected, review)
+    if stale:
+        writeLog("warning", logger,
+                 f"[Selection] {len(stale)} papers del checkpoint ya no están en el "
+                 f"ranking actual; se descartan (no se pueden refrescar).")
 
     # IDs ya seleccionados
     selected_ids = {p["paper_id"] for p in selected}

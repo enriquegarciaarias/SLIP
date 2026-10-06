@@ -97,11 +97,13 @@ def processManualIngestion():
 
         # Construir el paper al estilo del pipeline
         max_manual_idx += 1
+        paper_id = f"manual_{max_manual_idx}"
         new_paper = {
-            "paper_id": f"manual_{max_manual_idx}",
+            "paper_id": paper_id,
             "source": "manual_ingestion",
+            "origin": entry.get("origin", "manual"),
             "doi": (entry.get("doi") or "").strip().lower() if entry.get("doi") else None,
-            "title": entry.get("title", filename.replace(".pdf", "")),
+            "title": entry.get("title", Path(filename).stem),
             "abstract": entry.get("abstract", ""),
             "year": entry.get("year"),
             "authors": entry.get("authors", []),
@@ -109,8 +111,12 @@ def processManualIngestion():
             "relevance_score": 1.0,  # Máxima relevancia porque el usuario lo eligió a mano
             "selected": True
         }
+        if entry.get("bibkey"):
+            new_paper["bibkey"] = entry["bibkey"]
 
         new_global_id = get_global_id(new_paper)
+        if new_global_id:
+            new_paper["global_id"] = new_global_id
 
         # Detección de duplicados mediante global_id
         if new_global_id in existing_global_ids:
@@ -119,11 +125,27 @@ def processManualIngestion():
             skipped_duplicates += 1
             continue
 
+        # Copiar el PDF local a la carpeta de trabajo para que la adquisición
+        # no intente descargarlo de nuevo (y quede archivado para el corpus).
+        pdfs_dir = output_dir / "pdfs"
+        pdfs_dir.mkdir(parents=True, exist_ok=True)
+        target_pdf = pdfs_dir / f"{paper_id}.pdf"
+        try:
+            shutil.copy2(source_pdf, target_pdf)
+            new_paper["local_pdf_path"] = str(target_pdf)
+            new_paper["acquisition_status"] = "manual_local"
+            new_paper["pdf_source"] = "manual_input"
+        except Exception as exc:
+            writeLog("warning", logger,
+                     f"[Ingestion] No se pudo copiar {filename} a {target_pdf}: {exc}")
+
         # Añadir al pipeline
         existing_global_ids.add(new_global_id)
         selected_papers.append(new_paper)
         ingested_count += 1
-        writeLog("info", logger, f"[Ingestion] ✅ Inyectado: {new_paper['paper_id']} -> {new_paper['title'][:50]}")
+        writeLog("info", logger,
+                 f"[Ingestion] ✅ Inyectado: {new_paper['paper_id']} "
+                 f"[{new_paper.get('origin', 'manual')}] -> {new_paper['title'][:50]}")
 
     # 4. Guardar el selected_papers.json actualizado (el contrato para Acquisition)
     if ingested_count > 0:

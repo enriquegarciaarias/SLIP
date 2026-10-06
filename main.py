@@ -9,8 +9,6 @@ from sources.common.paramsManager import getConfigs
 def mainProcess():
     """
     """
-
-
     from sources.normalizeSearchResults import processNormalizeSearchResults
     # -> wos_search.json + scopus_search.json
     processNormalizeSearchResults()

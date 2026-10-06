@@ -71,8 +71,12 @@ Luego editar `config.json`:
 |---|---|
 | `defaults.huggingFaceToken` | Reemplazar `REEMPLAZAR_CON_TU_TOKEN_DE_HUGGING_FACE` por tu token de Hugging Face. |
 | `defaults.enrichment.unpaywall_email` | Reemplazar `REEMPLAZAR_CON_TU_EMAIL` por tu email (API Unpaywall). |
-| `defaults.search.availables` | Fuentes activas (`wos`, `scopus`, `ieee`, `pubmed`). |
-| `defaults.search.<fuente>` | Nombre de fichero esperado en la entrada del subject (ver sección 4). |
+| `defaults.search.availables` | Fuentes activas (`wos`, `scopus`, `ieee`, `pubmed`, `openalex`). |
+| `defaults.search.<fuente>` | Nombre de fichero esperado en la entrada del subject (modo `file`, ver sección 4). |
+| `defaults.search.providers` | Modo de ingesta por fuente (`api`/`file`) y credenciales (Scopus/IEEE/PubMed; OpenAlex solo `email`). |
+| `defaults.search.decomposition` | `enabled: true` lanza, además de la query global, una consulta por pregunta de investigación (`concepts[]`). |
+| `defaults.search.refresh` | `true` ignora el snapshot y reconsulta las APIs. |
+| `defaults.search.merge` | `by_title_only_min_chars` para el dedup por título sin año. |
 | `defaults.llm` | `primary_model` (qwen3:8b) y `fallback_model` (qwen2.5:7b, llama3.1:8b). |
 | `defaults.<modulo>` | Umbrales de cada etapa (discovery, ranking, conceptAlignment, corpusCleaning, ...). |
 
@@ -95,17 +99,47 @@ results/input/{subject}/
 
 ### Resultados de bases de datos (obligatorio)
 
-Debes **exportar y colocar tú los resultados de las bases de datos** en la carpeta del subject,
-con los nombres exactos de `config.json`. El pipeline no busca en las bases de datos: las
-consume en ficheros.
+Cada fuente se ingesta en modo **API** o modo **fichero**, según
+`config.json > defaults.search.providers.<fuente>.mode`:
+
+- **`api`** (recomendado en PubMed/Scopus/IEEE): el pipeline consulta la API oficial, guarda la
+  respuesta cruda en `results/input/{subject}/_raw/` (snapshot reproducible) y la normaliza
+  offline. No necesita que exportes nada a mano.
+- **`file`**: consumes los ficheros exportados (comportamiento clásico; queda para WoS hasta
+  disponer de API key).
+
+Modo fichero (nombres exactos de `config.json`):
 
 - **WoS**: exportar en *Plain text* → `wos_export.txt`
 - **Scopus**: exportar en *CSV* → `scopus_export.csv`
 - **IEEE Xplore**: exportar en *CSV* → `ieee_export.csv`
 - **PubMed**: exportar en formato *MEDLINE* → `pubmed_export.txt`
 
-> El parser admite múltiples ficheros por fuente si el patrón de `config.json` se cambia a un
-> glob (p. ej. `pubmed_export*.txt`).
+> El parser de fichero admite múltiples ficheros por fuente si el patrón de `config.json` se
+> cambia a un glob (p. ej. `pubmed_export*.txt`).
+
+### Query de búsqueda por API
+
+La query se lee de `conceptsQuery.json`. Como cada base de datos usa su propia sintaxis, puedes
+definir queries específicas por fuente con la clave `queries`:
+
+```json
+{
+  "query": "cadena genérica (WoS)",
+  "queries": {
+    "scopus": "TITLE-ABS-KEY(artificial intelligence AND inclusive education)",
+    "ieee": "(inclusive education) AND (artificial intelligence)",
+    "pubmed": "artificial intelligence AND inclusive education"
+  }
+}
+```
+
+Prioridad: `config.json > search.providers.<fuente>.query` → `queries.<fuente>` → `query`.
+Si una fuente en modo `api` no tiene credenciales o falla, el pipeline **degrada automáticamente
+a modo fichero** (si existe el export) sin abortar.
+
+> Con `search.refresh = true` se ignora el snapshot y se vuelve a consultar la API. Por defecto
+> (`false`) se reutiliza el snapshot más reciente para la misma query.
 
 ### Ingestión manual (opcional)
 
@@ -120,6 +154,34 @@ Para incorporar PDFs "semilla" de forma manual:
    ]
    ```
 
+> El scanner de PDFs (`manualPapersScanner`) rellena `manual_papers.json` automáticamente, por lo
+> que en la práctica basta con dejar los PDFs en la carpeta.
+
+### Manuscrito del investigador (opcional, `--manuscript 1`)
+
+Para incorporar el manuscrito en construcción y sus referencias citadas:
+
+```
+results/input/{subject}/manual_papers/manuscript/
+├── manuscript.pdf        # manuscrito (obligatorio)
+├── main.tex              # fuente LaTeX (recomendado para extraer las citas)
+├── biblio.bib           # bibliografía BibTeX (recomendado para el mapeo)
+├── <bibkey>.pdf         # PDFs asociados, nombrados con su clave BibTeX
+└── ...
+```
+
+- Los PDFs asociados se integran en el circuito normal (como `manual_papers`), quedando marcados
+  con `origin="manuscript"` en `selected_papers.json` / `selected_acquired.json`.
+- Nombra cada PDF con la **bibkey** de `biblio.bib` (p. ej. `smith2020.pdf`): el mapeo es
+  determinista. Si no, se intenta por DOI/título y por la bóveda (`_pdf_vault`), y los no
+  asociados se reportan en `manuscript_refs.json`.
+- Se genera una sección **"Evidencias en el manuscrito"** en `training_materials.md` con, por
+  cada referencia: el texto que la menciona, una extensión explicativa tomada del propio paper
+  (LLM con grounding, caché en `manuscript_context_cache.json`) y sus datos estructurados.
+- Las referencias citadas **sin PDF disponible** se marcan con ⚠️ (incluida la cita y el estado),
+  para facilitar su verificación; si la bibkey no existe en el `.bib` se advierte de posible error.
+- `manuscript.pdf` nunca se ingesta como paper del corpus.
+
 ---
 
 ## ▶️ 5. Ejecución
@@ -129,11 +191,18 @@ source .venv/bin/activate
 
 # Pipeline completo para el subject "sensores"
 python main.py --subject sensores --proc SLIP
+
+# Con manuscrito del investigador y sin desarrollar conceptos emergentes
+python main.py --subject sensores --proc SLIP --manuscript 1 --emergente 0
 ```
 
 - `--subject`: nombre del asunto (carpeta en `results/input/`). Por defecto `sensores`.
 - `--proc`: tipo de proceso. Por defecto `SLIP` (pipeline completo). Otro valor ejecuta
   `customProcess()` (complementos, p. ej. migraciones).
+- `--manuscript`: `1` integra `manual_papers/manuscript/` y añade la sección de evidencias
+  del manuscrito; `0` (por defecto) lo desactiva.
+- `--emergente`: `0` no desarrolla los conceptos emergentes en `training_materials.md`
+  (se mantienen los conteos de PRISMA y la bibliografía); `1` (por defecto) sí los desarrolla.
 
 ### Puntos de interacción manual durante la ejecución
 
@@ -164,6 +233,7 @@ Todo se genera en `results/output/{subject}/`:
 | Adquisición | `pdfs/`, `selected_acquired.json`, `pdf_download_log.json`, `missing_pdfs.json`, `pdf_inventory.json` |
 | Corpus | `papers_metadata.json`, `papers_text.json` |
 | Análisis | `candidate_concepts.json`, `concept_candidates.json`, `aligned_concepts.json`, `concept_evidence.json`, `clustered_evidences.json`, `enriched_evidences.json`, `concept_findings.json`, `technical_annex.json` |
+| Manuscrito (si `--manuscript 1`) | `manuscript_refs.json`, `manuscript_context_cache.json` |
 | Documentos finales | `training_materials.md`, `related_work.md` |
 
 Logs: `ProcessLog.txt` (pipeline) y `Process.txt` (proceso).
@@ -180,3 +250,16 @@ Logs: `ProcessLog.txt` (pipeline) y `Process.txt` (proceso).
   interfaz de recuperación manual del paso 5.
 - **Referencia técnica:** consultar `docs/pipeline_SLIP.md` para el detalle de entradas/salidas
   de cada módulo.
+
+---
+
+## 🧪 8. Tests
+
+```bash
+source .venv/bin/activate
+python -m unittest discover -s tests -t .
+```
+
+Cubren las utilidades críticas: normalización de DOI, índice determinista PDF↔paper
+(`pdfIndex`), filtro de referencias, cita a nivel de afirmación, dedup de conceptos,
+resolución de queries por RQ y proveedor OpenAlex.

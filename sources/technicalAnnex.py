@@ -256,7 +256,9 @@ class TechnicalProfileExtractor:
         Extrae las secciones de metodología y resultados del paper.
         Fallback al texto completo si no hay secciones estructuradas.
         """
-        sections = paper.get("sections", {})
+        # papers_text.json expone las secciones como `clean_sections`; se admite
+        # `sections` por compatibilidad con versiones antiguas del contrato.
+        sections = paper.get("clean_sections") or paper.get("sections", {})
         limit = self._config.max_section_chars
 
         methodology = next(

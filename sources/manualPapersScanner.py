@@ -25,6 +25,7 @@ import fitz
 
 from sources.common.common import logger, writeLog
 from sources.common.utils import inicioModulo, read_json, write_json
+from sources.manuscriptEvidence import build_manuscript_refs, find_manuscript_dir
 
 
 # ---------------------------------------------------------------------------
@@ -177,19 +178,18 @@ def processManualPapersScanner(input_dir: Path = None, output_dir: Path = None):
         writeLog("info", logger, f"[ManualScanner] No existe {manual_dir}. Skipping.")
         return None
 
-    pdfs = sorted(manual_dir.glob("*.pdf"))
-    if not pdfs:
-        writeLog("info", logger, f"[ManualScanner] No hay PDFs en {manual_dir}. Skipping.")
-        return None
-
     manual_json = manual_dir / "manual_papers.json"
     existing = _load_existing(manual_json)
 
     entries = []
     added = updated = unchanged = 0
+
+    # --- 1) PDFs "semilla" de primer nivel -------------------------------
+    pdfs = sorted(manual_dir.glob("*.pdf"))
     for pdf in pdfs:
         entry = dict(existing.get(pdf.name, {}))
         entry["file"] = pdf.name
+        entry.setdefault("origin", "manual")
         detected = extract_pdf_metadata(pdf)
         changed = _merge_entry(entry, detected)
 
@@ -204,15 +204,54 @@ def processManualPapersScanner(input_dir: Path = None, output_dir: Path = None):
 
         entries.append(entry)
 
+    # --- 2) PDFs del manuscrito (solo si --manuscript=1) -----------------
+    manuscript_pdfs = 0
+    refs = build_manuscript_refs(input_dir, output_dir, persist=True)
+    if refs:
+        mdir = find_manuscript_dir(input_dir)
+        for ref in refs.get("references", []):
+            if not ref.get("has_pdf"):
+                continue
+            rel_file = str(Path("manuscript") / ref["pdf_file"])
+            entry = dict(existing.get(rel_file, {}))
+            entry["file"] = rel_file
+            entry["origin"] = "manuscript"
+            entry["bibkey"] = ref.get("key")
+
+            detected = {"title": ref.get("title") or None, "doi": ref.get("doi") or None}
+            pdf_path = mdir / ref["pdf_file"]
+            if pdf_path.exists():
+                for field_name, value in extract_pdf_metadata(pdf_path).items():
+                    detected.setdefault(field_name, value)
+            changed = _merge_entry(entry, detected)
+
+            if rel_file in existing:
+                if changed:
+                    updated += 1
+                else:
+                    unchanged += 1
+            else:
+                added += 1
+                manuscript_pdfs += 1
+                writeLog("info", logger,
+                         f"[ManualScanner] 📄 PDF de manuscrito: {ref['pdf_file']} -> {ref.get('key')}")
+
+            entries.append(entry)
+
+    if not entries:
+        writeLog("info", logger, f"[ManualScanner] No hay PDFs en {manual_dir}. Skipping.")
+        return None
+
     write_json(manual_json, entries)
     writeLog("info", logger, "=" * 60)
     writeLog("info", logger, "MANUAL PAPERS SCANNER COMPLETED")
     writeLog("info", logger, "=" * 60)
-    writeLog("info", logger, f"  PDFs encontrados: {len(pdfs)}")
-    writeLog("info", logger, f"  Añadidos nuevos:  {added}")
-    writeLog("info", logger, f"  Actualizados:     {updated}")
-    writeLog("info", logger, f"  Sin cambios:      {unchanged}")
-    writeLog("info", logger, f"  Fichero:          {manual_json}")
+    writeLog("info", logger, f"  PDFs semilla:      {len(pdfs)}")
+    writeLog("info", logger, f"  PDFs manuscrito:   {manuscript_pdfs}")
+    writeLog("info", logger, f"  Añadidos nuevos:   {added}")
+    writeLog("info", logger, f"  Actualizados:      {updated}")
+    writeLog("info", logger, f"  Sin cambios:       {unchanged}")
+    writeLog("info", logger, f"  Fichero:           {manual_json}")
     writeLog("info", logger, "✅ [END] processManualPapersScanner")
 
     return entries
@@ -227,6 +266,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--subject", type=str, default="AERASOA")
+    parser.add_argument("--manuscript", type=int, choices=[0, 1], default=None)
+    parser.add_argument("--emergente", type=int, choices=[0, 1], default=None)
     args = parser.parse_args()
 
     config = configLoader()

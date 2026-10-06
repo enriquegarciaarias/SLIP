@@ -183,7 +183,10 @@ def parse_wos_file(filepath, source_name="wos", start_index=1):
             if not line.strip():
                 continue
 
-            match = re.match(r'^([A-Z]{2,4})\s(.*)$', line)
+            # WoS usa tags de 2 letras, pero algunos (D1/D2/D3, etc.) son
+            # alfanuméricos; si no se reconocen, su valor se agrega por error
+            # al campo anterior (p. ej. corrompe DI con la fecha de D3).
+            match = re.match(r'^([A-Z][A-Z0-9]{1,3})\s(.*)$', line)
             # A continuation line is indented and does NOT match the
             # tag pattern (WoS continuations start with spaces, e.g.
             # "   Rossi, Alessio" under AU).
@@ -661,7 +664,15 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
 
 def processNormalizeSearchResults():
     """
-    Procesa todas las fuentes definidas en processControl.defaults.get("search")
+    Procesa todas las fuentes definidas en processControl.defaults.get("search").
+
+    Dos rutas de ingesta, según `search.providers.<fuente>.mode`:
+      - "api"  : proveedor oficial (PubMed/Scopus/IEEE) con snapshot crudo y
+                 normalización offline (ver `sources/ingestion/`).
+      - "file" : parser del fichero exportado (comportamiento original).
+
+    Si una fuente API falla o no tiene credenciales, se degrada a modo file
+    cuando existe el fichero correspondiente.
     """
     input_dir, output_dir = inicioModulo("processNormalizeSearchResults")
 
@@ -673,7 +684,20 @@ def processNormalizeSearchResults():
     writeLog("info", logger, f"Processing sources: {availables}")
 
     results = {}
+
+    # 1) Ingesta API-first (snapshot crudo + normalize offline)
+    try:
+        from sources.ingestion.manager import run_api_ingestion
+        api_results = run_api_ingestion(search_config, input_dir, output_dir)
+        results.update(api_results)
+    except Exception as exc:
+        writeLog("exception", logger, f"Falló la capa de ingesta API: {exc}")
+
+    # 2) Fuentes en modo file (o fallback de las API que no resolvieron)
     for source in availables:
+        if source in results:
+            continue
+
         file_pattern = search_config.get(source)
         if not file_pattern:
             writeLog("warning", logger, f"No file pattern defined for source: {source}")

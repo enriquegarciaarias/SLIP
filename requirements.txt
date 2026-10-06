@@ -79,7 +79,9 @@ rich==15.0.0
 safetensors==0.7.0
 scikit-learn==1.9.0
 scipy==1.17.1
+sacremoses==0.2.0
 sentence-transformers==5.5.1
+sentencepiece==0.2.2
 setuptools==81.0.0
 shellingham==1.5.4
 six==1.17.0

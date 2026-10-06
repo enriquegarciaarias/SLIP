@@ -132,10 +132,37 @@ def normalize_text(text):
 
 
 def normalize_doi(doi):
+    """
+    Normaliza un DOI para comparación/deduplicación:
+      - aísla el DOI canónico (10.<registrant>/<sufijo>) si viene embebido
+        en otros metadatos (p. ej. WoS añade "D3 2025-11-27" al campo DI)
+      - minúsculas y sin espacios
+      - sin prefijos de resolución (https://doi.org/, doi:, dx.doi.org...)
+      - sin puntuación final (punto, coma, paréntesis, corchete...)
+    """
     if not doi:
         return ""
 
-    return doi.strip().lower()
+    doi = str(doi).strip().lower()
+
+    # Aislar el DOI canónico: ignora prefijos y metadatos adyacentes separados
+    # por espacios (evita corromper la clave de deduplicación por DOI).
+    match = re.search(r"10\.\d{4,9}/\S+", doi)
+    if match:
+        doi = match.group(0)
+
+    for prefix in (
+        "https://doi.org/",
+        "http://doi.org/",
+        "https://dx.doi.org/",
+        "http://dx.doi.org/",
+        "doi:",
+    ):
+        if doi.startswith(prefix):
+            doi = doi[len(prefix):].strip()
+            break
+
+    return doi.rstrip(".,;)]}>'\"")
 
 def inicioModulo(modulo):
     writeLog("info", logger, "-" * 60)

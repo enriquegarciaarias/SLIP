@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -40,8 +40,17 @@ from tqdm import tqdm
 
 from sources.common.common import logger, writeLog
 from sources.common.llm_client import LLMClient, create_ollama_client
+from sources.common.referenceFilter import looks_like_reference
 from sources.common.translationService import TranslationService
 from sources.common.utils import inicioModulo
+from sources.manuscriptEvidence import (
+    ManuscriptEvidence,
+    ManuscriptEvidenceBuilder,
+    build_manuscript_refs,
+    emerging_enabled,
+    manuscript_enabled,
+)
+from sources.enrich_evidences import EnrichmentConfig, PaperSectionExtractor
 
 
 # ---------------------------------------------------------------------------
@@ -58,10 +67,17 @@ class TrainingConfig:
     translate_evidences: bool = False
     translation_cache_file: str = "translation_cache.json"
     translation_max_chars: int = 3000
+    translation_backend: str = "marian"
+    translation_model: str = "Helsinki-NLP/opus-mt-en-es"
+    filter_reference_fragments: bool = True
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1024
     emerging_max_tokens: int = 2048
     min_finding_score: float = 0.40
+    # Flags de ejecución (--emergente / --manuscript); se fijan en el entry point.
+    emerging_enabled: bool = True
+    manuscript_enabled: bool = False
+    manuscript_extension_max_tokens: int = 300
 
     @classmethod
     def from_project_config(cls, project: Dict) -> "TrainingConfig":
@@ -74,6 +90,11 @@ class TrainingConfig:
             max_chars_per_emerging=t.get("max_chars_per_emerging", 8000),
             translate_evidences=t.get("translate_evidences", False),
             min_finding_score=t.get("min_finding_score", 0.40),
+            translation_backend=t.get("translation_backend", "marian"),
+            translation_model=t.get(
+                "translation_model", "Helsinki-NLP/opus-mt-en-es"
+            ),
+            filter_reference_fragments=t.get("filter_reference_fragments", True),
         )
 
     @classmethod
@@ -105,6 +126,7 @@ class FindingItem:
     evidence_count: int
     avg_evidence_score: float
     top_quotes: Tuple[EvidenceItem, ...]
+    citations: Dict[int, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -162,6 +184,24 @@ class PrismaStats:
     excluded_no_concept_papers: Tuple[Tuple[str, str], ...]  # (paper_id, title)
 
 
+class CitationRegistry:
+    """Asigna un número de referencia global, por orden de primera aparición."""
+
+    def __init__(self) -> None:
+        self._numbers: Dict[str, int] = {}
+
+    def number(self, doc_id: str) -> int:
+        if doc_id not in self._numbers:
+            self._numbers[doc_id] = len(self._numbers) + 1
+        return self._numbers[doc_id]
+
+    def is_empty(self) -> bool:
+        return not self._numbers
+
+    def ordered(self) -> Tuple[Tuple[str, int], ...]:
+        return tuple(sorted(self._numbers.items(), key=lambda kv: kv[1]))
+
+
 @dataclass(frozen=True)
 class DocumentModel:
     generated_at: str
@@ -171,6 +211,7 @@ class DocumentModel:
     emerging_topics: Tuple[EmergingTopic, ...]
     technical_concepts: Tuple[Dict, ...]
     bibliography: Dict[str, Dict]  # doc_id -> {title, doi, citation_count, bibtex, group}
+    manuscript_evidence: Optional["ManuscriptEvidence"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +346,7 @@ class DocumentDataBuilder:
         objectives_text: str,                     # NUEVO
         metadata_lookup: Dict[str, Dict],         # NUEVO
         prisma_raw: Dict,                         # NUEVO: conteos brutos para PRISMA
+        manuscript_evidence: Optional[ManuscriptEvidence] = None,
     ) -> DocumentModel:
         aligned_lookup = {
             str(ac.get("concept_id")): ac
@@ -323,13 +365,25 @@ class DocumentDataBuilder:
         for fd in findings_data:
             included_ids.update(fd.get("all_papers", []))
 
-        emerging_topics = self._build_emerging_topics(
-            emergent_ids, candidate_concepts, papers_text
-        )
-
-        emerging_paper_ids = set()
-        for topic in emerging_topics:
-            emerging_paper_ids.update(topic.paper_ids)
+        if self._cfg.emerging_enabled:
+            emerging_topics = self._build_emerging_topics(
+                emergent_ids, candidate_concepts, papers_text
+            )
+            emerging_paper_ids = set()
+            for topic in emerging_topics:
+                emerging_paper_ids.update(topic.paper_ids)
+        else:
+            # No se desarrollan los tópicos emergentes (ni se llama al LLM),
+            # pero se conservan sus papers para PRISMA y bibliografía.
+            emerging_topics = ()
+            emerging_paper_ids = set()
+            id_set = set(emergent_ids)
+            for concept in candidate_concepts.get("concepts", []):
+                if str(concept.get("concept_id")) in id_set:
+                    emerging_paper_ids.update(concept.get("document_indices", []))
+            writeLog("info", logger,
+                     "[Builder] Conceptos emergentes desactivados (--emergente 0): "
+                     "no se generan títulos/descripciones.")
 
         bibliography = self._build_bibliography(
             included_ids, emerging_paper_ids, metadata_lookup
@@ -347,6 +401,7 @@ class DocumentDataBuilder:
             emerging_topics=emerging_topics,
             technical_concepts=tuple(concepts_with_tech),
             bibliography=bibliography,
+            manuscript_evidence=manuscript_evidence,
         )
 
     def _build_search_stats(
@@ -421,6 +476,11 @@ class DocumentDataBuilder:
                 for q in f.get("top_quotes", [])
                 if q.get("similarity", 0) >= threshold
             )
+            citations = {
+                int(c["ref"]): c["doc_id"]
+                for c in f.get("citations", [])
+                if isinstance(c, dict) and "ref" in c and "doc_id" in c
+            }
             if quotes:
                 findings.append(
                     FindingItem(
@@ -428,7 +488,43 @@ class DocumentDataBuilder:
                         evidence_count=f.get("evidence_count", 0),
                         avg_evidence_score=f.get("avg_evidence_score", 0.0),
                         top_quotes=quotes,
+                        citations=citations,
                     )
+                )
+
+        # --- Limpieza determinista de fragmentos de bibliografía ---
+        before = len(valid_evidences)
+
+        def _keep(ev: EvidenceItem) -> bool:
+            return not (
+                self._cfg.filter_reference_fragments and looks_like_reference(ev.text)
+            )
+
+        if self._cfg.filter_reference_fragments:
+            valid_evidences = tuple(ev for ev in valid_evidences if _keep(ev))
+            filtered_findings: List[FindingItem] = []
+            for fi in findings:
+                quotes = tuple(q for q in fi.top_quotes if _keep(q))
+                if not quotes:
+                    writeLog(
+                        "debug",
+                        logger,
+                        f"[Builder] Finding dropped (sin evidencias válidas) "
+                        f"concept={concept_id}",
+                    )
+                    continue
+                filtered_findings.append(
+                    replace(fi, top_quotes=quotes)
+                    if len(quotes) != len(fi.top_quotes) else fi
+                )
+            findings = filtered_findings
+            dropped = before - len(valid_evidences)
+            if dropped:
+                writeLog(
+                    "info",
+                    logger,
+                    f"[Builder] Concepto {concept_id}: descartadas "
+                    f"{dropped} evidencias no válidas",
                 )
 
         paper_ids: Dict[str, str] = {ev.doc_id: ev.paper_title for ev in valid_evidences}
@@ -565,6 +661,8 @@ class MarkdownRenderer:
     No filtra datos, no llama al LLM, no lee disco.
     """
 
+    _CITE_RE = re.compile(r"\[(\d+)\]")
+
     _STRENGTH_MAP = (
         (5, 0.70, "Muy Alta", "🔴"),
         (3, 0.65, "Alta",     "🟠"),
@@ -577,24 +675,76 @@ class MarkdownRenderer:
         self._translation_svc = translation_svc
 
     def render(self, model: DocumentModel) -> str:
-        return "\n".join(
-            [
-                self._render_header(model),
-                self._render_search_stats(model.search_stats),
-                "---\n",
-                self._render_prisma(model.prisma),
-                "---\n",
-                self._render_concept_summary(model.concept_cards),
-                "---\n",
-                self._render_concept_cards(model.concept_cards),
-                self._render_emerging_topics(model.emerging_topics),
-                "---\n",
-                self._render_technical_annex(model.technical_concepts),
-                "---\n",
-                self._render_bibliography(model.bibliography),
-                self._render_footer(),
-            ]
-        )
+        # Registro global de citas, numeradas por orden de primera aparición.
+        self._citations = CitationRegistry()
+        for card in model.concept_cards:
+            for finding in card.findings:
+                for ref in sorted(finding.citations):
+                    self._citations.number(finding.citations[ref])
+
+        sections = [
+            self._render_header(model),
+            self._render_search_stats(model.search_stats),
+            "---\n",
+            self._render_prisma(model.prisma),
+            "---\n",
+            self._render_concept_summary(model.concept_cards),
+            "---\n",
+            self._render_concept_cards(model.concept_cards),
+        ]
+        if self._cfg.emerging_enabled:
+            sections.append(self._render_emerging_topics(model.emerging_topics))
+        if model.manuscript_evidence is not None:
+            sections.append(self._render_manuscript_evidence(model.manuscript_evidence))
+        if not self._citations.is_empty():
+            sections.append("---\n")
+            sections.append(self._render_cited_references(model.bibliography))
+        sections.extend([
+            "---\n",
+            self._render_technical_annex(model.technical_concepts),
+            "---\n",
+            self._render_bibliography(model.bibliography),
+            self._render_footer(),
+        ])
+        return "\n".join(sections)
+
+    def _translate_with_citations(
+        self, text: str, citations: Dict[int, str]
+    ) -> str:
+        """
+        Traduce el texto preservando los marcadores de cita y remapeando las
+        referencias locales (índice de evidencia) a la numeración global.
+        Los marcadores fuera de rango se descartan.
+        """
+        if not text:
+            return text
+        # Sin mapa de citas (p. ej. salidas antiguas) se traduce tal cual,
+        # preservando cualquier corchete del texto original.
+        if not citations:
+            return self._translation_svc.translate(text)
+        parts = self._CITE_RE.split(text)
+        out: List[str] = []
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                doc_id = citations.get(int(part))
+                if doc_id:
+                    out.append(f"[{self._citations.number(doc_id)}]")
+            else:
+                out.append(self._translation_svc.translate(part) if part.strip() else part)
+        return "".join(out)
+
+    def _render_cited_references(self, bibliography: Dict[str, Dict]) -> str:
+        """Lista numerada de las fuentes citadas inline (trazabilidad)."""
+        lines = ["## Referencias citadas (atribución por afirmación)\n"]
+        for doc_id, number in self._citations.ordered():
+            info = bibliography.get(doc_id, {})
+            title = info.get("title") or doc_id
+            bits = [f"**[{number}]** {title}"]
+            if info.get("doi"):
+                bits.append(f"DOI: `{info['doi']}`")
+            bits.append(f"ID: `{doc_id}`")
+            lines.append("- " + " — ".join(bits))
+        return "\n".join(lines) + "\n"
 
     def _render_header(self, model: DocumentModel) -> str:
         return (
@@ -674,15 +824,24 @@ class MarkdownRenderer:
                 continue
 
             for idx, finding in enumerate(card.findings, 1):
-                finding_text = self._translation_svc.translate(finding.finding_text)
+                finding_text = self._translate_with_citations(
+                    finding.finding_text, finding.citations
+                )
                 lines.append(f"**Hallazgo {idx}:**")
                 lines.append(f"> {finding_text}\n")
 
-                paper_ids = sorted(set(q.doc_id for q in finding.top_quotes))
-                if paper_ids:
-                    lines.append(f"**Papers:** {', '.join(paper_ids)}\n")
+                if finding.citations:
+                    refs = "".join(
+                        f"[{self._citations.number(finding.citations[r])}]"
+                        for r in sorted(finding.citations)
+                    )
+                    lines.append(f"**Fuentes:** {refs}\n")
                 else:
-                    lines.append("**Papers:** Sin papers asociados directamente\n")
+                    paper_ids = sorted(set(q.doc_id for q in finding.top_quotes))
+                    if paper_ids:
+                        lines.append(f"**Papers:** {', '.join(paper_ids)}\n")
+                    else:
+                        lines.append("**Papers:** Sin papers asociados directamente\n")
 
         return "\n".join(lines)
 
@@ -720,7 +879,9 @@ class MarkdownRenderer:
             strength, emoji = self._evidence_strength(
                 finding.avg_evidence_score, finding.evidence_count
             )
-            finding_text = self._translation_svc.translate(finding.finding_text)
+            finding_text = self._translate_with_citations(
+                finding.finding_text, finding.citations
+            )
             parts.append(
                 f"\n### Hallazgo {idx}: {emoji} {strength}\n\n"
                 f"> {finding_text}\n\n"
@@ -730,7 +891,7 @@ class MarkdownRenderer:
         return "\n".join(parts)
 
     # ------------------------------------------------------------------
-    # Renderizado de evidencias con resumen narrativo
+    # Renderizado de evidencias preservando la estructura enriquecida
     # ------------------------------------------------------------------
 
     def _render_evidence_blocks(self, evidences: Tuple[EvidenceItem, ...]) -> str:
@@ -738,81 +899,107 @@ class MarkdownRenderer:
         if not shown:
             return f"No hay evidencias con similitud ≥ {self._cfg.min_display_similarity}.\n"
 
-        rendered_narratives: set[str] = set()
+        # El structured_evidence (y el resumen narrativo, cuando no hay datos
+        # estructurados) es a nivel de paper: se muestra solo la primera vez que
+        # aparece cada paper en el bloque, para no repetir la misma información
+        # en cada fragmento textual sin descartar ningún campo.
+        rendered_structured: set[str] = set()
         blocks = []
         for ev in shown:
-            # Traducir el texto de evidencia (el fragmento entre comillas)
-            translated_text = self._translation_svc.translate(ev.text)
+            # El extracto verba se conserva en su idioma original (fidelidad);
+            # solo los textos extensos de "Datos estructurados" se traducen.
             title = ev.paper_title if ev.paper_title and ev.paper_title != "Unknown" else f"ID: {ev.doc_id}"
 
             block = (
                 f"- **{title}** "
                 f"(sim: {ev.similarity:.3f}) (ID: `{ev.doc_id}`)\n"
-                f'  *"{translated_text}"*\n'
+                f'  *"{ev.text}"*\n'
             )
 
-            if ev.narrative_summary:
-                # El resumen narrativo es a nivel de paper: se muestra solo la
-                # primera vez que aparece cada paper dentro de este bloque.
-                if ev.doc_id in rendered_narratives:
-                    block += "\n  *(Resumen narrativo del paper ya mostrado arriba)*\n"
-                else:
-                    rendered_narratives.add(ev.doc_id)
-                    translated_summary = self._translation_svc.translate(ev.narrative_summary)
-                    block += f"\n  *Resumen narrativo:* {translated_summary}\n"
-            else:
-                structured_md = self._render_structured_fallback(ev.structured_evidence)
-                if structured_md:
-                    block += f"\n{structured_md}\n"
+            if ev.doc_id in rendered_structured:
+                block += "\n  *(Datos estructurados del paper ya mostrados arriba)*\n"
+                blocks.append(block)
+                continue
+
+            structured_md = self._render_structured_evidence(ev.structured_evidence)
+            if structured_md:
+                rendered_structured.add(ev.doc_id)
+                block += f"\n{structured_md}\n"
+            elif ev.narrative_summary:
+                # Solo si no hay datos estructurados se recurre al resumen
+                # narrativo, que es una síntesis derivada de ellos (lossy).
+                rendered_structured.add(ev.doc_id)
+                translated_summary = self._translation_svc.translate(ev.narrative_summary)
+                block += f"\n  *Resumen narrativo:* {translated_summary}\n"
 
             blocks.append(block)
 
         return "\n".join(blocks)
 
-    def _render_structured_fallback(self, structured: Dict) -> str:
+    # Orden y etiquetas de los campos de structured_evidence.
+    _STRUCTURED_FIELDS: Tuple[Tuple[str, str], ...] = (
+        ("ideas", "Ideas / contexto"),
+        ("solution", "Contribución principal"),
+        ("usage", "Contexto de uso"),
+        ("methods", "Metodología"),
+        ("results", "Resultados"),
+        ("applications", "Aplicaciones"),
+        ("gap", "Brecha abordada"),
+        ("evolutions", "Trabajo futuro"),
+        ("signals", "Señales"),
+        ("models", "Modelos"),
+        ("metrics", "Métricas"),
+        ("limitations", "Limitaciones"),
+    )
+
+    def _render_structured_evidence(self, structured: Dict) -> str:
         """
-        Genera un resumen narrativo en forma de párrafo a partir de todos los campos
-        de structured_evidence (en inglés). Se usa cuando no hay narrative_summary.
+        Renderiza `structured_evidence` conservando su estructura: un campo
+        etiquetado por línea, sin colapsarlos en un único párrafo. Traduce cada
+        valor y preserva listas (elemento a elemento) y diccionarios (clave:
+        valor) completos. Cualquier clave nueva no contemplada en el orden
+        conocido se añade igualmente para no perder información.
         """
         if not structured:
             return ""
 
-        # Orden y etiquetas en inglés (todas las claves posibles)
-        field_order = [
-            ("solution", "Main contribution"),
-            ("usage", "Usage"),
-            ("ideas", "Key ideas"),
-            ("methods", "Methodology"),
-            ("results", "Results"),
-            ("applications", "Applications"),
-            ("gap", "Gap addressed"),
-            ("evolutions", "Future work"),
-            ("signals", "Signals"),
-            ("models", "Models"),
-            ("metrics", "Metrics"),
-            ("limitations", "Limitations"),
-        ]
+        indent = "  "
+        lines: List[str] = [f"{indent}**Datos estructurados:**"]
 
-        sentences = []
-        for key, label in field_order:
+        def _join(seq) -> str:
+            return "; ".join(
+                self._translation_svc.translate(str(v)) for v in seq if str(v).strip()
+            )
+
+        def _render_value(val) -> str:
+            if isinstance(val, dict):
+                return "; ".join(
+                    f"{self._translation_svc.translate(str(k))}: "
+                    f"{self._translation_svc.translate(str(v))}"
+                    for k, v in val.items() if k and v
+                )
+            if isinstance(val, (list, tuple, set)):
+                return _join(val)
+            return self._translation_svc.translate(str(val))
+
+        known = {key for key, _ in self._STRUCTURED_FIELDS}
+        for key, label in self._STRUCTURED_FIELDS:
             val = structured.get(key)
             if not val:
                 continue
-            # Convertir listas o dicts a string legible
-            if isinstance(val, list):
-                val = ", ".join(str(v) for v in val if v)
-            elif isinstance(val, dict):
-                val = ", ".join(f"{k}: {v}" for k, v in val.items() if v)
-            if not val:
+            rendered = _render_value(val)
+            if rendered:
+                lines.append(f"{indent}- **{label}:** {rendered}")
+
+        for key, val in structured.items():
+            if key in known or not val:
                 continue
-            translated_val = self._translation_svc.translate(str(val))
-            sentences.append(f"{label}: {translated_val}")
+            rendered = _render_value(val)
+            if rendered:
+                label = key.replace("_", " ").capitalize()
+                lines.append(f"{indent}- **{label}:** {rendered}")
 
-        if not sentences:
-            return ""
-
-        # Concatenar en un único párrafo coherente
-        return "Structured summary: " + ". ".join(sentences) + "."
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     # ------------------------------------------------------------------
     # Métodos legados (mantenidos por compatibilidad)
@@ -855,10 +1042,116 @@ class MarkdownRenderer:
             )
         return "\n".join(parts) + "\n---\n"
 
+    def _render_manuscript_reference(self, ref) -> str:
+        label = f"[{ref.bibkey}]" if ref.bibkey else "(sin clave)"
+        title = ref.title or ref.bibkey
+        block = [f"### {label} — {title}\n"]
+        if ref.doi:
+            block.append(f"*DOI: `{ref.doi}`*\n")
+
+        if ref.contexts:
+            block.append("**Cita en el manuscrito:**")
+            for ctx in ref.contexts:
+                block.append(f'> "{ctx}"')
+            block.append("")
+        else:
+            block.append(
+                "**Cita en el manuscrito:** *no se encontró contexto textual*\n"
+            )
+
+        if ref.extension:
+            block.append(f"**Qué aportaba el paper original:** {ref.extension}\n")
+
+        structured_md = self._render_structured_evidence(ref.structured_evidence)
+        if structured_md:
+            block.append(structured_md)
+        return "\n".join(block)
+
+    def _render_manuscript_evidence(self, evidence: ManuscriptEvidence) -> str:
+        n_missing = len(evidence.cited_without_pdf)
+        parts = [
+            "## Evidencias en el manuscrito\n\n",
+            "Referencias citadas en el manuscrito del investigador: se muestra el "
+            "texto que las menciona, un recordatorio de su aportación original "
+            "(para confirmar la relevancia) y sus datos estructurados.\n\n",
+            f"**Resumen:** {evidence.n_cited} referencias citadas; "
+            f"{evidence.n_matched} enriquecidas con el texto del paper; "
+            f"{n_missing} sin PDF disponible (marcadas con ⚠️).\n\n",
+        ]
+
+        if not evidence.references and not n_missing:
+            parts.append(
+                "No se pudo asociar ninguna referencia citada con un PDF del corpus.\n"
+            )
+
+        for ref in evidence.references:
+            parts.append(self._render_manuscript_reference(ref))
+
+        # -- Referencias no enriquecidas: señaladas como susceptibles de error --
+        if evidence.cited_without_pdf:
+            parts.append("### ⚠️ Referencias citadas sin PDF disponible\n")
+            parts.append(
+                "Aparecen en el manuscrito pero no se ha podido asociar ningún PDF "
+                "en `manual_papers/manuscript/` ni en el corpus. **Verificar la "
+                "referencia**: la descarga está pendiente o la cita/bibkey puede ser "
+                "errónea.\n"
+            )
+            for miss in evidence.cited_without_pdf:
+                block = [f"#### ⚠️ [{miss.bibkey}] — {miss.title}\n"]
+                if miss.doi:
+                    block.append(f"*DOI: `{miss.doi}`*\n")
+                if not miss.in_bib:
+                    block.append(
+                        f"⚠️ **No existe la entrada `{miss.bibkey}` en el fichero "
+                        "`.bib` (posible error de cita).**\n"
+                    )
+                if miss.contexts:
+                    block.append("**Cita en el manuscrito:**")
+                    for ctx in miss.contexts:
+                        block.append(f'> "{ctx}"')
+                    block.append("")
+                if miss.reason == "pdf_not_indexed":
+                    block.append(
+                        "**Estado:** ⚠️ el PDF está presente pero no se ha podido "
+                        "indexar en el corpus (revisar el mapeo o reejecutar la ingesta).\n"
+                    )
+                else:
+                    block.append(
+                        "**Estado:** ⚠️ sin PDF (descarga pendiente o referencia errónea).\n"
+                    )
+                parts.append("\n".join(block))
+
+        # -- PDFs presentes pero no asociados a ninguna bibkey --
+        if evidence.unmatched_pdfs:
+            parts.append("### ⚠️ PDFs sin referencia asociada\n")
+            parts.append(
+                "Ficheros presentes en `manual_papers/manuscript/` que no se han "
+                "podido asociar a ninguna entrada de `biblio.bib` (revisar el nombre "
+                "del fichero o la bibkey):\n"
+            )
+            for name in evidence.unmatched_pdfs:
+                parts.append(f"- ⚠️ `{name}`")
+            parts.append("")
+
+        return "\n".join(parts) + "\n---\n"
+
     def _render_technical_annex(self, concepts: Tuple[Dict, ...]) -> str:
         header = "## Anexo Técnico: Metodologías y Experimentación\n\n"
         if not concepts:
             return header + "No se encontraron datos técnicos.\n"
+
+        # Columnas derivadas dinámicamente de los campos configurados en
+        # studyDescription.json (proyectados en cada perfil). Así el anexo es
+        # genérico y no depende del dominio (antes: columnas fijas de sensores).
+        columns = self._tech_columns(concepts)
+        if not columns:
+            return header + "No se encontraron datos técnicos.\n"
+
+        table_header = "| ID | " + " | ".join(
+            self._tech_label(c) for c in columns
+        ) + " |"
+        table_sep = "| :--- |" + " :--- |" * len(columns)
+
         lines = [header]
         for concept in concepts:
             papers = concept.get("papers", [])
@@ -868,34 +1161,39 @@ class MarkdownRenderer:
                 f"### Concepto {concept.get('concept_id')}: "
                 f"{concept.get('concept_name', '')}\n"
             )
-            lines.append(
-                "| ID | Dispositivos | Modalidades | Características "
-                "| Modelos ML/DL | Rendimiento | Limitaciones |"
-            )
-            lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+            lines.append(table_header)
+            lines.append(table_sep)
             for paper in papers[:10]:
-                lines.append(self._render_tech_row(paper))
+                lines.append(self._render_tech_row(paper, columns))
             lines.append("")
         return "\n".join(lines)
 
     @staticmethod
-    def _render_tech_row(paper: Dict) -> str:
+    def _tech_columns(concepts: Tuple[Dict, ...]) -> Tuple[str, ...]:
+        """Columnas = unión ordenada de las claves de perfil presentes."""
+        columns: List[str] = []
+        for concept in concepts:
+            for paper in concept.get("papers", []):
+                for key in (paper.get("profile") or {}).keys():
+                    if key not in columns:
+                        columns.append(key)
+        return tuple(columns)
+
+    @staticmethod
+    def _tech_label(field: str) -> str:
+        return field.replace("_", " ").strip().capitalize()
+
+    @staticmethod
+    def _render_tech_row(paper: Dict, columns: Tuple[str, ...]) -> str:
         profile = paper.get("profile", {})
 
         def fmt(val) -> str:
             if isinstance(val, list):
-                return (", ".join(val) or "—").replace("|", "\\|")
-            return (str(val) if val else "—").replace("|", "\\|")
+                return (", ".join(str(v) for v in val) or "—").replace("|", "\\|")
+            return (str(val) if val not in (None, "") else "—").replace("|", "\\|")
 
-        return (
-            f"| `{paper.get('paper_id', '?')}` "
-            f"| {fmt(profile.get('sensor_devices'))} "
-            f"| {fmt(profile.get('sensor_modalities'))} "
-            f"| {fmt(profile.get('feature_extraction_methods'))} "
-            f"| {fmt(profile.get('machine_learning_models'))} "
-            f"| {fmt(profile.get('performance_metrics'))} "
-            f"| {fmt(profile.get('limitations'))} |"
-        )
+        cells = " | ".join(fmt(profile.get(c)) for c in columns)
+        return f"| `{paper.get('paper_id', '?')}` | {cells} |"
 
     # ------------------------------------------------------------------
     # BIBLIOGRAFÍA ENRIQUECIDA CON BIBTEX, DOI Y CITATION COUNT
@@ -939,7 +1237,7 @@ class MarkdownRenderer:
     def _render_footer() -> str:
         return (
             "\n*Documento generado automáticamente por SLIP. "
-            "Títulos en idioma original; fragmentos y resúmenes traducidos al español.*\n"
+            "Títulos y extractos en idioma original; datos estructurados traducidos al español.*\n"
         )
 
     def _evidence_strength(self, avg_score: float, count: int) -> Tuple[str, str]:
@@ -977,6 +1275,7 @@ class TrainingMaterialsPipeline:
         prisma_raw: Dict,
         output_file: Optional[Path] = None,
         cache_dir: Optional[Path] = None,
+        manuscript_evidence: Optional[ManuscriptEvidence] = None,
     ) -> str:
         model = self._builder.build(
             findings_data=findings_data,
@@ -988,11 +1287,14 @@ class TrainingMaterialsPipeline:
             objectives_text=objectives_text,
             metadata_lookup=metadata_lookup,
             prisma_raw=prisma_raw,
+            manuscript_evidence=manuscript_evidence,
         )
-        if cache_dir:
-            self._translation_svc.save_cache()
 
         markdown = self._renderer.render(model)
+
+        # La caché de traducción se nutre durante el render; guardarla después.
+        if cache_dir:
+            self._translation_svc.save_cache()
 
         if output_file:
             output_file.write_text(markdown, encoding="utf-8")
@@ -1017,10 +1319,15 @@ def build_pipeline(
         max_tokens=config.llm_max_tokens,
     )
     emerging_analyzer = EmergingTopicAnalyzer(llm_client=client, config=config)
-    builder = DocumentDataBuilder(config=config, emerging_analyzer=emerging_analyzer)
+    builder = DocumentDataBuilder(
+        config=config,
+        emerging_analyzer=emerging_analyzer,
+    )
     renderer = MarkdownRenderer(config=config, translation_svc=translation_svc)
     pipeline = TrainingMaterialsPipeline(
-        builder=builder, renderer=renderer, translation_svc=translation_svc
+        builder=builder,
+        renderer=renderer,
+        translation_svc=translation_svc,
     )
     return pipeline
 
@@ -1098,6 +1405,7 @@ def processTrainingMaterials() -> Optional[str]:
             metadata_lookup[pid] = {
                 "title": p.get("title") or canon.get("title", ""),
                 "doi": p.get("doi") or canon.get("doi", ""),
+                "abstract": p.get("abstract") or canon.get("abstract", ""),
                 "citation_count": p.get("citation_count",
                                         p.get("cited_by_count", canon.get("citation_count", 0))),
                 "authors": p.get("authors") or canon.get("authors", []),
@@ -1127,14 +1435,50 @@ def processTrainingMaterials() -> Optional[str]:
 
     # --- CONFIG ---
     config = TrainingConfig.from_file(study_file)
+    config.emerging_enabled = emerging_enabled()
+    config.manuscript_enabled = manuscript_enabled()
+    writeLog("info", logger,
+             f"[TrainingMaterials] Flags: manuscript={int(config.manuscript_enabled)}, "
+             f"emergente={int(config.emerging_enabled)}")
+
+    # --- CLIENTE LLM (compartido por tópicos emergentes y manuscrito) ---
+    llm_client = create_ollama_client(
+        model=config.llm_model,
+        max_retries=2,
+        temperature=config.llm_temperature,
+        max_tokens=config.llm_max_tokens,
+    )
+
+    # --- EVIDENCIA DEL MANUSCRITO (opcional, --manuscript=1) ---
+    manuscript_evidence = None
+    if config.manuscript_enabled:
+        refs = build_manuscript_refs(input_dir, output_dir, persist=True)
+        if refs:
+            enrichment_cfg = EnrichmentConfig.from_file(study_file)
+            extractor = PaperSectionExtractor(enrichment_cfg)
+            ms_builder = ManuscriptEvidenceBuilder(
+                llm_client=llm_client,
+                cache_file=output_dir / "manuscript_context_cache.json",
+                extractor=extractor,
+                max_tokens=config.manuscript_extension_max_tokens,
+            )
+            manuscript_evidence = ms_builder.build(refs, papers_text, metadata_lookup)
+        else:
+            writeLog("warning", logger,
+                     "[TrainingMaterials] Manuscrito activado pero no se pudo construir "
+                     "manuscript_refs.json (revisa manual_papers/manuscript/).")
 
     # --- TRADUCCIÓN ---
     cache_file = output_dir / config.translation_cache_file
-    translation_svc = TranslationService(cache_file=cache_file)
+    translation_svc = TranslationService(
+        cache_file=cache_file,
+        backend=config.translation_backend,
+        model_name=config.translation_model,
+    )
     translation_svc.load_cache()
 
     # --- PIPELINE ---
-    pipeline = build_pipeline(config, translation_svc)
+    pipeline = build_pipeline(config, translation_svc, llm_client=llm_client)
 
     return pipeline.run(
         findings_data=findings_data,
@@ -1148,6 +1492,7 @@ def processTrainingMaterials() -> Optional[str]:
         prisma_raw=prisma_raw,
         output_file=output_dir / "training_materials.md",
         cache_dir=output_dir,
+        manuscript_evidence=manuscript_evidence,
     )
 
 

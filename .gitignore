@@ -9,13 +9,10 @@ models/
 results/
 
 # Allow paper folder for version control
-!results/output/
-!results/output/AERASOA/
 !results/output/AERASOA/Springer/
 
 # Entornos virtuales
 .venv/
-cyberbullying_env/
 
 # IDEs
 .idea/

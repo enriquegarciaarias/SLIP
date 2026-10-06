@@ -60,6 +60,10 @@ OFF_TOPIC_ALPHA = 0.5
 MIN_TOPICS_PER_RQ = 2
 MIN_PAPERS_PER_TOPIC = 2
 N_SEED_TERMS = 30
+# Umbral de similitud de etiqueta para fusionar conceptos (casi) duplicados
+# al aplanar los clusters de todas las RQs. Calibrado sobre bge-base: los
+# duplicados claros puntúan 0.93-0.99; 0.88 no fusiona temas distintos.
+CONCEPT_DEDUP_THRESHOLD = 0.88
 RELEVANT_SECTIONS = ["abstract", "introduction", "methodology", "results", "conclusion"]
 
 # Síntesis del contexto de estudio (ancla de similitud coseno)
@@ -85,7 +89,8 @@ def load_discovery_config() -> None:
 
     global EMBEDDING_MODEL, SECTION_FILTER_THRESHOLD, SECTION_FILTER_ALPHA, \
         OFF_TOPIC_THRESHOLD, OFF_TOPIC_ALPHA, MIN_TOPICS_PER_RQ, MIN_PAPERS_PER_TOPIC, \
-        N_SEED_TERMS, SYNTHESIS_MIN_TOKENS, SYNTHESIS_MAX_TOKENS, SYNTHESIS_MAX_CHARS
+        N_SEED_TERMS, SYNTHESIS_MIN_TOKENS, SYNTHESIS_MAX_TOKENS, SYNTHESIS_MAX_CHARS, \
+        CONCEPT_DEDUP_THRESHOLD
 
     EMBEDDING_MODEL = disc.get("embedding_model", EMBEDDING_MODEL)
     SECTION_FILTER_THRESHOLD = float(disc.get("section_filter_threshold", SECTION_FILTER_THRESHOLD))
@@ -98,6 +103,7 @@ def load_discovery_config() -> None:
     SYNTHESIS_MIN_TOKENS = int(disc.get("synthesis_min_tokens", SYNTHESIS_MIN_TOKENS))
     SYNTHESIS_MAX_TOKENS = int(disc.get("synthesis_max_tokens", SYNTHESIS_MAX_TOKENS))
     SYNTHESIS_MAX_CHARS = int(disc.get("synthesis_max_chars", SYNTHESIS_MAX_CHARS))
+    CONCEPT_DEDUP_THRESHOLD = float(disc.get("concept_dedup_threshold", CONCEPT_DEDUP_THRESHOLD))
 
 # UMAP / HDBSCAN
 UMAP_COMPONENTS = 8
@@ -523,6 +529,91 @@ def fallback_concept_discovery(clean_corpus: list[dict], seed_terms: list[str], 
 
 
 # --------------------------------------------------
+# DEDUPLICACIÓN DE CONCEPTOS (fusiona clusters casi-idénticos entre RQs)
+# --------------------------------------------------
+def deduplicate_concepts(
+    concepts: list,
+    doc_topic_map: list,
+    embedding_model,
+    threshold: float = None,
+) -> tuple[list, list]:
+    """
+    Fusiona conceptos cuyas etiquetas son semánticamente casi idénticas
+    (coseno >= threshold). Un mismo paper aparece en las mismas RQs, por lo
+    que el aplanado produce clusters duplicados con etiquetas equivalentes.
+
+    Devuelve (conceptos_deduplicados, doc_topic_map_remapeado).
+    """
+    if threshold is None:
+        threshold = CONCEPT_DEDUP_THRESHOLD
+    if not concepts:
+        return concepts, doc_topic_map
+
+    labels = [(c.get("label") or "").strip().lower() for c in concepts]
+    embeddings = embedding_model.encode(labels, normalize_embeddings=True)
+    sim_matrix = embeddings @ embeddings.T
+
+    kept: list = []          # representantes
+    id_map: dict = {}        # concept_id_original -> concept_id_representante
+
+    for i, concept in enumerate(concepts):
+        label = labels[i]
+        match_j = None
+        if label:
+            for j, rep in enumerate(kept):
+                if sim_matrix[i, rep["_idx"]] >= threshold:
+                    match_j = j
+                    break
+
+        if match_j is None:
+            new_c = dict(concept)
+            new_c["_idx"] = i
+            kept.append(new_c)
+            id_map[concept.get("concept_id")] = concept.get("concept_id")
+            continue
+
+        rep = kept[match_j]
+        # Unión de documentos, keywords y contadores.
+        docs = list(dict.fromkeys((rep.get("document_indices") or []) + (concept.get("document_indices") or [])))
+        rep["document_indices"] = docs
+        rep["n_papers"] = len(docs)
+        if concept.get("n_chunks"):
+            rep["n_chunks"] = int(rep.get("n_chunks") or 0) + int(concept.get("n_chunks") or 0)
+        kw = list(dict.fromkeys((rep.get("keywords") or []) + (concept.get("keywords") or [])))
+        rep["keywords"] = kw
+        # La similitud de estudio del representante se maximiza.
+        rep["study_similarity"] = max(
+            float(rep.get("study_similarity") or 0.0),
+            float(concept.get("study_similarity") or 0.0),
+        )
+        id_map[concept.get("concept_id")] = rep.get("concept_id")
+
+    for rep in kept:
+        rep.pop("_idx", None)
+
+    # Remapear doc_topic_map a los conceptos representantes (sin duplicados).
+    remapped = []
+    seen = set()
+    for mapping in doc_topic_map:
+        topic = mapping.get("topic")
+        new_topic = id_map.get(topic, topic)
+        key = (mapping.get("doc_id"), new_topic, mapping.get("section"))
+        if key in seen:
+            continue
+        seen.add(key)
+        m = dict(mapping)
+        m["topic"] = new_topic
+        remapped.append(m)
+
+    removed = len(concepts) - len(kept)
+    if removed:
+        writeLog("info", logger,
+                 f"[Discovery] Dedup de conceptos: {removed} fusionados "
+                 f"({len(concepts)} -> {len(kept)}, umbral={threshold})")
+    return kept, remapped
+
+
+# --------------------------------------------------
 # ENTRY POINT: ORQUESTADOR SLR ORIENTADO A PREGUNTAS
 # --------------------------------------------------
 def processDiscoveryEngine():
@@ -668,6 +759,12 @@ def processDiscoveryEngine():
                 merged_doc_topic_map.append(mapping)
 
             topic_id_offset += 100
+
+        # Fusionar conceptos (casi) duplicados entre RQs y remapear el mapa
+        # doc->topic a los representantes.
+        merged_concepts, merged_doc_topic_map = deduplicate_concepts(
+            merged_concepts, merged_doc_topic_map, embedding_model
+        )
 
         final_dict_output = {
             "schema_version": "1.5",

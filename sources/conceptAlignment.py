@@ -13,7 +13,8 @@ from pathlib import Path
 # CONFIG
 # --------------------------------------------------
 
-EMBEDDING_MODEL          = "BAAI/bge-large-en-v1.5"
+# Espacio de embeddings unificado con discovery/evidence/cluster (bge-base).
+EMBEDDING_MODEL          = "BAAI/bge-base-en-v1.5"
 TOP_K_ASSIGNMENTS        = 3
 ALIGNMENT_SCORE_THRESHOLD = 0.40
 TOPIC_DOC_TEXT_LIMIT     = 4000
@@ -289,7 +290,8 @@ def rerank_documents_with_concept(
     focus_terms: list[str] = None,
     percentile_threshold: int = None,
     min_docs: int = None,
-    alignment_score: float = None
+    alignment_score: float = None,
+    alignment_scores: dict = None
 ) -> list[tuple[dict, float]]:
     if percentile_threshold is None: percentile_threshold = RERANK_PERCENTILE
     if min_docs is None: min_docs = MIN_DOCS_AFTER_RERANK
@@ -333,10 +335,20 @@ def rerank_documents_with_concept(
     if len(filtered) < min_docs:
         filtered = scored[:min_docs]
 
-    if alignment_score is not None:
+    # Score combinado (alineación + rerank). Se admite un escalar único o un
+    # mapa por documento (doc_id -> score de alineación) cuando el re-ranking
+    # se ejecuta sobre el pool completo del concepto.
+    if alignment_score is not None or alignment_scores:
         combined = []
         for doc, rerank_score in filtered:
-            final_score = ALIGNMENT_SCORE_WEIGHT * alignment_score + RERANK_SCORE_WEIGHT * rerank_score
+            if alignment_scores:
+                a = alignment_scores.get(doc.get("doc_id"), alignment_score)
+            else:
+                a = alignment_score
+            if a is None:
+                combined.append((doc, rerank_score))
+                continue
+            final_score = ALIGNMENT_SCORE_WEIGHT * a + RERANK_SCORE_WEIGHT * rerank_score
             combined.append((doc, final_score))
         combined.sort(key=lambda x: x[1], reverse=True)
         filtered = combined
@@ -389,16 +401,12 @@ def aggregate_documents_by_objective_concept(
             result[concept_id] = [(doc, None) for doc in docs]
             continue
 
-        reranked = []
-        for doc in docs:
-            align_score = alignment_scores.get(doc["doc_id"])
-            reranked_docs = rerank_documents_with_concept(
-                [doc], obj_concept, model, focus_terms,
-                alignment_score=align_score
-            )
-            if reranked_docs:
-                reranked.extend(reranked_docs)
-
+        # Re-ranking real sobre el pool completo del concepto: se calcula el
+        # percentil y el score combinado por documento, en un único batch.
+        reranked = rerank_documents_with_concept(
+            docs, obj_concept, model, focus_terms,
+            alignment_scores=alignment_scores,
+        )
         reranked.sort(key=lambda x: x[1], reverse=True)
         result[concept_id] = reranked
 
