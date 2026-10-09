@@ -183,12 +183,24 @@ class PubmedProvider(SearchProvider):
             if term:
                 keywords.append(term)
 
-        # Identificadores
+        # Identificadores PROPIOS del artículo.
+        # IMPORTANTE: solo `PubmedData/ArticleIdList`; iterar todo el
+        # `PubmedArticle` incluiría los `ArticleId` de la lista de referencias
+        # y el último sobrescribiría el DOI/PMCID real (bug detectado: un
+        # artículo heredaba el DOI de su última referencia).
         ids: Dict[str, str] = {}
-        for article_id in article.iter("ArticleId"):
-            id_type = article_id.get("IdType")
-            if id_type:
-                ids[id_type] = (article_id.text or "").strip()
+        own_id_list = article.find("PubmedData/ArticleIdList")
+        if own_id_list is not None:
+            for article_id in own_id_list.findall("ArticleId"):
+                id_type = article_id.get("IdType")
+                if id_type:
+                    ids[id_type] = (article_id.text or "").strip()
+        # Fallback: ELocationID con EIdType="doi" si falta el ArticleId.
+        if not ids.get("doi"):
+            for eloc in art.findall("ELocationID"):
+                if (eloc.get("EIdType") or "").lower() == "doi":
+                    ids["doi"] = _text(eloc)
+                    break
         doi = ids.get("doi", "")
         pmcid = ids.get("pmc", "")
 

@@ -270,17 +270,32 @@ indicando la sección de la que proviene.
 **Módulo:** `sources/conceptEvidence.py` · `processConceptEvidence()`
 
 **Propósito:** Extrae evidencias (párrafos) de los papers seleccionados para cada concepto/RQ
-alineado, configurable desde `studyDescription.json`. Antes de segmentar, descarta la cola de
-bibliografía (`referenceFilter.strip_reference_tail`) para no generar evidencias sobre referencias.
+alineado. Genera ventanas deslizantes sobre **todas las secciones** del paper (no solo la
+sección alineada), ponderadas por `section_weights`, y las puntúa por similitud a la query del
+concepto (+ BM25 + boosts acotados). Antes de segmentar, descarta la cola de bibliografía
+(`referenceFilter.strip_reference_tail`).
 
-- **Toma:** `aligned_concepts.json` + `papers_text.json` + `studyDescription.json` (config de evidencias).
-- **Deja:** `concept_evidence.json`.
+**Genericidad vs. diferencial (bloque de consenso):**
+- Para cada ventana se calcula su **genericidad** = similitud media (`genericity_topk`) a las
+  ventanas de **otros papers**: alta = texto que se repite en el corpus.
+- `genericity >= generic_threshold` → se segrega al bloque **"Consenso general (ya conocido)"**
+  (`concept_evidence.json > concepts[].consensus`), agrupado por similitud con `(N papers)`.
+- El resto son evidencias **diferenciales** (`knowledge_units`).
+- La genericidad **no altera el score** que usa el filtro (solo clasifica/ordena): la relevancia
+  decide y no se promocionan rarezas irrelevantes.
+- **Configuración:** `config.json > defaults.conceptEvidence` (`section_weights`,
+  `genericity_penalty`, `genericity_topk`, `generic_threshold`, `consensus_enabled`,
+  `consensus_cluster_threshold`); `studyDescription.json > project.evidence_extraction` tiene
+  prioridad. `section_weights` favorece results/conclusion sobre introduction/abstract.
+
+- **Toma:** `aligned_concepts.json` + `papers_text.json` + `studyDescription.json` + `config.json`.
+- **Deja:** `concept_evidence.json` (por concepto: `knowledge_units` diferenciales y `consensus`).
 
 ### 12. Clustering de evidencias
 **Módulo:** `sources/clusterEvidences.py` · `processClusterEvidences()`
 
-**Propósito:** Agrupa las evidencias en clusters temáticos dentro de cada concepto para estructurar
-el análisis posterior.
+**Propósito:** Agrupa las evidencias diferenciales en clusters temáticos dentro de cada concepto
+para estructurar el análisis posterior. Propaga el bloque `consensus` a la salida.
 
 - **Toma:** `concept_evidence.json`.
 - **Deja:** `clustered_evidences.json`.
@@ -290,10 +305,11 @@ el análisis posterior.
 
 **Propósito:** Enriquece cada cluster/evidencia con análisis estructurado generado por LLM
 (limitaciones, lagunas de investigación, trabajo futuro, uso, etc.), usando el texto por secciones
-de cada paper.
+de cada paper. El prompt prioriza lo **específico/diferencial** del paper e ignora el contexto
+genérico del campo, y añade el campo `differential_contribution`.
 
 - **Toma:** `clustered_evidences.json` + `papers_text.json` (+ config de `studyDescription.json`).
-- **Deja:** `enriched_evidences.json`.
+- **Deja:** `enriched_evidences.json` (propaga `consensus`).
 
 ### 14. Síntesis de hallazgos
 **Módulo:** `sources/sythesizeFindings.py` · `processSynthesizeFindings()`
@@ -315,6 +331,13 @@ partir de las evidencias enriquecidas. Utiliza caché de resúmenes narrativos (
 `studyDescription.json > project.technical_extraction.fields` (modalidades, métricas, datasets,
 limitaciones, contribuciones, ...) a partir de los hallazgos y del corpus.
 
+- **Campos configurables:** cada campo tiene `name`, `description` (instrucción de qué buscar,
+  **nunca** un valor de ejemplo), `type` (`string`/`list`), `examples` (vocabulario de apoyo,
+  presentado aparte) y `note` (texto de referencia no usado por el prompt).
+- El prompt usa un esquema con **placeholders neutros** y prohíbe copiar la guía; una
+  **salvaguarda anti-eco** descarta valores que reproduzcan la descripción/ejemplos del campo.
+- Usa como contexto `abstract`/`introduction` + metodología + resultados.
+
 - **Toma:** `concept_findings.json` + `aligned_concepts.json` + `papers_text.json` + `papers_metadata.json` + `studyDescription.json`.
 - **Deja:** `technical_annex.json`.
 
@@ -329,6 +352,14 @@ y del corpus, con traducción configurable (caché en `translation_cache.json`; 
 - **Citas inline:** los hallazgos se renderizan con marcadores `[n]` remapeados a una numeración
   global por orden de aparición, con una sección "Referencias citadas (atribución por afirmación)".
   La traducción preserva dichos marcadores.
+
+- **Consenso general:** cada concepto renderiza primero un bloque **"Consenso general (ya
+  conocido)"** con los fragmentos repetidos entre papers agrupados `(N papers)`, seguido de las
+  evidencias diferenciales. Así lo genérico no contamina lo singular.
+
+- **Datos estructurados:** por paper se muestran en orden priorizando el aporte diferencial
+  (`differential_contribution`), contribución principal, brecha, resultados, metodología,
+  limitaciones, … y "Contexto general" (introducción) en último lugar.
 
 - **Flags:** con `--emergente 0` se omiten los conceptos emergentes (sin llamadas al LLM, pero se
   conservan sus papers para PRISMA y bibliografía); con `--manuscript 1` se añade la sección

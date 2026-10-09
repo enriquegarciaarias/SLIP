@@ -183,13 +183,15 @@ En esencia, este módulo resuelve el problema de cómo pasar de un paper complet
 | Elemento | Formato | Procedencia | Descripción |
 |----------|---------|-------------|-------------|
 | **Conceptos alineados** | `aligned_concepts.json` (JSON) | Módulo anterior (`concept_alignment.py`) | Estructura con conceptos de investigación, sus queries, y los documentos (papers) asociados. |
+| **Secciones de los papers** | `papers_text.json` (JSON) | Módulo anterior (`corpusCleaning.py`) | Secciones (`clean_sections`) de cada paper; permiten extraer evidencias de **todas** las secciones (no solo la alineada), ponderadas por `section_weights`. |
 | **Focus terms** | `studyDescription.json` (JSON) | Configuración del proyecto | Lista de términos prioritarios que reciben mayor peso en el scoring (ej. "HRV", "dark patterns", "XAI"). |
-| **Configuración** | `studyDescription.json` (JSON) | Configuración del proyecto | Parámetros: modelo de embeddings, tamaño de ventana, pesos de scoring, umbrales de filtrado. |### Salidas
+| **Configuración** | `studyDescription.json` (`project.evidence_extraction`) y `config.json` (`defaults.conceptEvidence`) | Configuración del proyecto | Modelo de embeddings, tamaño de ventana, pesos de scoring, umbrales de filtrado, `section_weights`, `genericity_penalty`, `genericity_topk`, `generic_threshold`, `consensus_enabled`, `consensus_cluster_threshold`. |
 ### Salidas del Módulo `concept_evidence.py`
 
 | Elemento | Formato | Descripción |
 |----------|---------|-------------|
-| **Evidencias por concepto** | `concept_evidence.json` (JSON) | Estructura donde cada concepto contiene una lista de `knowledge_units`. Cada unidad es un fragmento de texto de un paper con su metadata (`doc_id`, título, similitud). |
+| **Evidencias diferenciales por concepto** | `concept_evidence.json` (JSON) | Cada concepto contiene una lista de `knowledge_units` (fragmentos diferenciales). Cada unidad incluye `doc_id`, título, `similarity`, `section` y `genericity`. |
+| **Consenso general** | `concept_evidence.json` (JSON) | Cada concepto incluye `consensus`: fragmentos genéricos (repetidos entre papers) agrupados, con `representative_text`, `doc_ids`, `n_papers` y `genericity`. |
 | **Expansión de queries** | Interno | Queries enriquecidas con términos adicionales generados por un LLM para mejorar la recuperación de fragmentos relevantes. |
 
 ---
@@ -205,7 +207,18 @@ En esencia, este módulo resuelve el problema de cómo pasar de un paper complet
       "doc_id": "wos_5",
       "paper_title": "Toward explainable affective computing: A review",
       "evidence_text": "The model learns from behavioral signals...",
-      "similarity": 0.78
+      "similarity": 0.78,
+      "section": "results",
+      "genericity": 0.42
+    }
+  ],
+  "consensus": [
+    {
+      "representative_text": "AI tools can support inclusive education by personalizing learning...",
+      "section": "results",
+      "doc_ids": ["wos_1", "wos_3", "wos_9"],
+      "n_papers": 10,
+      "genericity": 0.86
     }
   ]
 }
@@ -258,8 +271,15 @@ e) Rescate de documentos sin representación: Si algún documento no tiene evide
 
 f) Límite máximo: Máximo de 80 evidencias por concepto.
 
-6. Persistencia y reporte
-Guarda el resultado en concept_evidence.json.
+6. Ponderación por sección, genericidad y consenso
+Ponderación por sección (`section_weights`): las ventanas se generan sobre todas las secciones del paper y se multiplican por el peso de su sección (results 1.0, conclusion 0.9, methodology 0.8, introduction 0.5, abstract 0.4). Así se favorece lo diferencial frente al enunciado genérico del problema.
+
+Genericidad: para cada ventana se calcula su similitud media (top-k) a las ventanas de otros papers. Alta genericidad = texto que se repite en el corpus.
+
+Separación consenso/diferencial: las ventanas con `genericity ≥ generic_threshold` se agrupan en `consensus` (bloque "Consenso general (ya conocido)", con representantes y `n_papers`); el resto quedan como evidencias diferenciales. La genericidad no modifica el score del filtro (solo clasifica/ordena), de modo que no se promocionan rarezas irrelevantes.
+
+7. Persistencia y reporte
+Guarda el resultado en concept_evidence.json (con `knowledge_units` y `consensus` por concepto).
 
 Genera un resumen estadístico en el log con el número de unidades de conocimiento por concepto y documentos representados.
 
@@ -293,7 +313,7 @@ Genera un resumen estadístico en el log con el número de unidades de conocimie
 │                            SALIDA                                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  concept_evidence.json                                                    │
-│  (conceptos → knowledge_units: fragmentos con doc_id y similitud)        │
+│  (conceptos → knowledge_units diferenciales + consensus)                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -303,7 +323,7 @@ Encargado de agrupar semánticamente los fragmentos de texto (evidencias) extra�
 
 ### Entradas
 Elemento	Formato	Procedencia	Descripción
-Evidencias por concepto	concept_evidence.json (JSON)	Módulo anterior	Estructura con knowledge_units: lista de fragmentos de texto con su doc_id, paper_title y similarity (relevancia respecto al concepto).
+Evidencias por concepto	concept_evidence.json (JSON)	Módulo anterior	Estructura con `knowledge_units` diferenciales (fragmentos con `doc_id`, `paper_title`, `similarity`, `section` y `genericity`) y el bloque `consensus` (fragmentos genéricos repetidos entre papers).
 Focus terms	studyDescription.json (JSON)	Configuración del proyecto	Lista de términos prioritarios para el proyecto (ej. "HRV", "dark patterns", "XAI"). Se usan para relajar el umbral de clustering en conceptos con alta densidad de focus terms, permitiendo clusters más grandes y generales.
 ### Salidas
 Elemento	Formato	Descripción
@@ -317,6 +337,10 @@ Estructura de salida (por concepto)
   "focus_density": 0.45,
   "total_evidences": 27,
   "n_clusters": 4,
+  "consensus": [
+    {"representative_text": "AI tools can support inclusive...", "section": "results",
+     "doc_ids": ["wos_1", "wos_3"], "n_papers": 10, "genericity": 0.86}
+  ],
   "clusters": [
     {
       "cluster_id": 0,

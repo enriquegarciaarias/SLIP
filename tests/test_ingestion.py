@@ -6,6 +6,35 @@ import unittest
 from sources.ingestion.base import QueryResolver
 from sources.ingestion.manager import _dedup_records
 from sources.ingestion.openalex_provider import OpenAlexProvider
+from sources.ingestion.pubmed_provider import PubmedProvider
+
+_PUBMED_XML = """<?xml version="1.0"?>
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>39981353</PMID>
+      <Article>
+        <ArticleTitle>Assessing zero-shot VQA for ECG interpretation</ArticleTitle>
+        <Journal><Title>Front Cardiovasc Med</Title></Journal>
+      </Article>
+      <ReferenceList>
+        <Reference>
+          <ArticleIdList>
+            <ArticleId IdType="doi">10.1111/1365-2656.12382</ArticleId>
+            <ArticleId IdType="pmc">PMC99999999</ArticleId>
+          </ArticleIdList>
+        </Reference>
+      </ReferenceList>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">39981353</ArticleId>
+        <ArticleId IdType="doi">10.3389/fcvm.2025.1458289</ArticleId>
+        <ArticleId IdType="pmc">PMC11839599</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+</PubmedArticleSet>"""
 
 
 class TestQueryResolver(unittest.TestCase):
@@ -74,6 +103,17 @@ class TestDedupRecords(unittest.TestCase):
             {"original_id": "title:z"},
         ]
         self.assertEqual(len(_dedup_records(records)), 2)
+
+
+class TestPubmedProviderIds(unittest.TestCase):
+    def test_uses_own_article_ids_not_reference_ids(self):
+        provider = PubmedProvider("pubmed", {})
+        records = provider.normalize({"xml_batches": [_PUBMED_XML]})
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        # El DOI/PMCID deben ser los propios, no los de la última referencia.
+        self.assertEqual(record["doi"], "10.3389/fcvm.2025.1458289")
+        self.assertEqual(record["pmcid"], "PMC11839599")
 
 
 if __name__ == "__main__":

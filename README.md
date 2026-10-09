@@ -78,6 +78,7 @@ Luego editar `config.json`:
 | `defaults.search.refresh` | `true` ignora el snapshot y reconsulta las APIs. |
 | `defaults.search.merge` | `by_title_only_min_chars` para el dedup por título sin año. |
 | `defaults.llm` | `primary_model` (qwen3:8b) y `fallback_model` (qwen2.5:7b, llama3.1:8b). |
+| `defaults.conceptEvidence` | Evidencias: `section_weights`, `genericity_penalty`, `genericity_topk`, `generic_threshold`, `consensus_enabled`, `consensus_cluster_threshold` (sección "Consenso general" y evidencias diferenciales). |
 | `defaults.<modulo>` | Umbrales de cada etapa (discovery, ranking, conceptAlignment, corpusCleaning, ...). |
 
 ---
@@ -238,6 +239,10 @@ Todo se genera en `results/output/{subject}/`:
 
 Logs: `ProcessLog.txt` (pipeline) y `Process.txt` (proceso).
 
+En `training_materials.md`, cada concepto se organiza en un bloque **"Consenso general (ya
+conocido)"** (fragmentos que se repiten entre papers, agrupados `(N papers)`) seguido de las
+**evidencias diferenciales**; los datos estructurados de cada paper priorizan el aporte diferencial.
+
 ---
 
 ## 🛡️ 7. Notas y solución de problemas
@@ -262,4 +267,6 @@ python -m unittest discover -s tests -t .
 
 Cubren las utilidades críticas: normalización de DOI, índice determinista PDF↔paper
 (`pdfIndex`), filtro de referencias, cita a nivel de afirmación, dedup de conceptos,
-resolución de queries por RQ y proveedor OpenAlex.
+resolución de queries por RQ, proveedor OpenAlex, la extracción de campos técnicos
+(prompt y salvaguarda anti-eco del anexo) y la **genericidad/consenso** de evidencias
+(penalización, separación consenso/diferencial y ponderación por sección).

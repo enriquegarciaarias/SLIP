@@ -644,7 +644,8 @@ def processClusterEvidences():
                 "focus_density": 0.0,
                 "total_evidences": 0,
                 "n_clusters": 0,
-                "clusters": []
+                "clusters": [],
+                "consensus": concept.get("consensus", []),
             })
             continue
 
@@ -665,6 +666,7 @@ def processClusterEvidences():
             cluster_result, concept_id, concept_query, focus_terms, focus_density,
             llm_client=llm_client
         )
+        summary["consensus"] = concept.get("consensus", [])
         model_evaluations.append(summary)
 
         # Reporte decorativo (se mantiene en el log, como el usuario prefiere)

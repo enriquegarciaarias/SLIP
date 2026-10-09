@@ -139,6 +139,7 @@ class ConceptCard:
     all_evidences: Tuple[EvidenceItem, ...]
     represented_papers: Tuple[str, ...]
     represented_titles: Dict[str, str]
+    consensus: Tuple[Dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -364,6 +365,11 @@ class DocumentDataBuilder:
         included_ids = set()
         for fd in findings_data:
             included_ids.update(fd.get("all_papers", []))
+            # Un paper que solo aporta evidencia de consenso también forma parte
+            # del concepto (se renderiza en el bloque "Consenso general"), así
+            # que cuenta como incluido en el PRISMA y en la bibliografía.
+            for group in fd.get("consensus", []) or []:
+                included_ids.update(group.get("doc_ids", []) or [])
 
         if self._cfg.emerging_enabled:
             emerging_topics = self._build_emerging_topics(
@@ -542,6 +548,7 @@ class DocumentDataBuilder:
             all_evidences=valid_evidences,
             represented_papers=tuple(paper_ids.keys()),
             represented_titles=paper_ids,
+            consensus=tuple(concept_data.get("consensus", [])),
         )
 
     def _build_emerging_topics(
@@ -863,18 +870,21 @@ class MarkdownRenderer:
         if card.represented_papers:
             header += f"\n**Papers representados:** {len(card.represented_papers)}\n"
 
+        consensus_md = self._render_consensus(card.consensus)
+
         if not card.findings:
             if card.all_evidences:
                 return (
                     header
+                    + consensus_md
                     + "\n### Estado: SIN HALLAZGOS SINTETIZADOS\n\n"
                     + "Se encontraron fragmentos relevantes sin hallazgos consolidados.\n\n"
                     + "**Evidencias textuales:**\n\n"
                     + self._render_evidence_blocks(card.all_evidences)
                 )
-            return header + "\n### Estado: SIN EVIDENCIA SUFICIENTE\n"
+            return header + consensus_md + "\n### Estado: SIN EVIDENCIA SUFICIENTE\n"
 
-        parts = [header]
+        parts = [header, consensus_md]
         for idx, finding in enumerate(card.findings, 1):
             strength, emoji = self._evidence_strength(
                 finding.avg_evidence_score, finding.evidence_count
@@ -889,6 +899,25 @@ class MarkdownRenderer:
                 + self._render_evidence_blocks(finding.top_quotes)
             )
         return "\n".join(parts)
+
+    def _render_consensus(self, consensus: Tuple[Dict, ...]) -> str:
+        """
+        Renderiza el bloque de consenso: textos genéricos que se repiten entre
+        papers, agrupados para no contaminar las evidencias diferenciales.
+        """
+        if not consensus:
+            return ""
+        lines = [
+            "\n### Consenso general (ya conocido)\n",
+            "*Fragmentos que se repiten entre papers (información general del "
+            "campo); se agrupan aquí para no duplicarlos en las evidencias "
+            "diferenciales.*\n",
+        ]
+        for item in consensus:
+            n = item.get("n_papers", 0)
+            text = self._translation_svc.translate(item.get("representative_text", ""))
+            lines.append(f"- **({n} papers)** {text}")
+        return "\n".join(lines) + "\n"
 
     # ------------------------------------------------------------------
     # Renderizado de evidencias preservando la estructura enriquecida
@@ -937,19 +966,22 @@ class MarkdownRenderer:
         return "\n".join(blocks)
 
     # Orden y etiquetas de los campos de structured_evidence.
+    # Se prioriza lo diferencial/aportación y se relega "ideas" (contexto
+    # genérico del campo) al final.
     _STRUCTURED_FIELDS: Tuple[Tuple[str, str], ...] = (
-        ("ideas", "Ideas / contexto"),
+        ("differential_contribution", "Aporte diferencial"),
         ("solution", "Contribución principal"),
-        ("usage", "Contexto de uso"),
-        ("methods", "Metodología"),
-        ("results", "Resultados"),
-        ("applications", "Aplicaciones"),
         ("gap", "Brecha abordada"),
+        ("results", "Resultados"),
+        ("methods", "Metodología"),
+        ("limitations", "Limitaciones"),
         ("evolutions", "Trabajo futuro"),
+        ("usage", "Contexto de uso"),
+        ("applications", "Aplicaciones"),
         ("signals", "Señales"),
         ("models", "Modelos"),
         ("metrics", "Métricas"),
-        ("limitations", "Limitaciones"),
+        ("ideas", "Contexto general"),
     )
 
     def _render_structured_evidence(self, structured: Dict) -> str:
@@ -1417,7 +1449,8 @@ def processTrainingMaterials() -> Optional[str]:
     # --- CONTEOS PRISMA brutos derivados del pipeline ---
     search_counts = {}
     for db, fname in (("WoS", "wos_search.json"), ("Scopus", "scopus_search.json"),
-                      ("IEEE", "ieee_search.json"), ("PubMed", "pubmed_search.json")):
+                      ("IEEE", "ieee_search.json"), ("PubMed", "pubmed_search.json"),
+                      ("ACM", "acm_search.json"), ("arXiv", "arxiv_search.json")):
         search_counts[db] = len(_load_optional(output_dir / fname, []))
     canonical = _load_optional(output_dir / "canonical.json", [])
     selected = _load_optional(output_dir / "selected_acquired.json",

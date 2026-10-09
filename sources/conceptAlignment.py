@@ -41,6 +41,14 @@ MIN_RERANK_SCORE = 0.45         # Umbral de calidad mínimo para aceptar un docu
 # concepto emergente para ser incorporado/alineado. 0.0 = sin filtro (todo pasa).
 MIN_STUDY_SIMILARITY = 0.0
 
+# --- Fallback a nivel de documento ---
+# Los papers solo entran en un concepto si su TEMA (BERTopic) se mapea a un RQ.
+# Con temas fragmentados, papers muy pertinentes caen en temas emergentes y se
+# pierden. Este fallback asigna cada paper NO cubierto por temas al RQ objetivo
+# con mayor similitud documento-concepto si supera este umbral.
+DOC_FALLBACK_ENABLED = True
+DOC_FALLBACK_THRESHOLD = 0.45  # alineado con MIN_RERANK_SCORE
+
 
 def load_concept_alignment_config() -> None:
     """
@@ -57,7 +65,7 @@ def load_concept_alignment_config() -> None:
         TOPIC_DOC_TEXT_LIMIT, TOPIC_DOCS_FOR_EMBEDDING, USE_ENHANCED_EMBEDDINGS, \
         RERANK_PERCENTILE, MIN_DOCS_AFTER_RERANK, ALIGNMENT_SCORE_WEIGHT, \
         RERANK_SCORE_WEIGHT, MIN_DOCS_PER_CONCEPT, MAX_DOCS_PER_CONCEPT, MIN_RERANK_SCORE, \
-        MIN_STUDY_SIMILARITY
+        MIN_STUDY_SIMILARITY, DOC_FALLBACK_ENABLED, DOC_FALLBACK_THRESHOLD
 
     EMBEDDING_MODEL = cfg.get("embedding_model", EMBEDDING_MODEL)
     TOP_K_ASSIGNMENTS = int(cfg.get("top_k_assignments", TOP_K_ASSIGNMENTS))
@@ -73,6 +81,8 @@ def load_concept_alignment_config() -> None:
     MAX_DOCS_PER_CONCEPT = int(cfg.get("max_docs_per_concept", MAX_DOCS_PER_CONCEPT))
     MIN_RERANK_SCORE = float(cfg.get("min_rerank_score", MIN_RERANK_SCORE))
     MIN_STUDY_SIMILARITY = float(cfg.get("min_study_similarity", MIN_STUDY_SIMILARITY))
+    DOC_FALLBACK_ENABLED = bool(cfg.get("doc_fallback_enabled", DOC_FALLBACK_ENABLED))
+    DOC_FALLBACK_THRESHOLD = float(cfg.get("doc_fallback_threshold", DOC_FALLBACK_THRESHOLD))
 
 
 # --------------------------------------------------
@@ -357,6 +367,106 @@ def rerank_documents_with_concept(
 
 
 # --------------------------------------------------
+# FALLBACK A NIVEL DE DOCUMENTO
+# --------------------------------------------------
+
+def _corpus_doc_text(paper: dict) -> str:
+    """Texto de embedding para un paper del corpus (título + secciones/texto)."""
+    title = paper.get("title", "")
+    sections = paper.get("clean_sections") or paper.get("sections") or {}
+    body_parts = []
+    for key in ("abstract", "introduction", "methods", "methodology", "results"):
+        chunk = sections.get(key)
+        if chunk:
+            body_parts.append(chunk)
+            if sum(len(p) for p in body_parts) > 2000:
+                break
+    body = " ".join(body_parts)
+    if not body:
+        body = paper.get("clean_text") or paper.get("text") or ""
+    return f"{title}\n{body[:2000]}"
+
+
+def select_best_objective(sim_row, concept_ids: list[int], threshold: float):
+    """Devuelve (concept_id, score) del mejor RQ si supera el umbral, si no None."""
+    if sim_row is None or len(sim_row) == 0:
+        return None
+    best_j = int(np.argmax(sim_row))
+    score = float(sim_row[best_j])
+    if score < threshold:
+        return None
+    return int(concept_ids[best_j]), score
+
+
+def add_document_level_fallback(
+    aligned_concepts:   list,
+    corpus:             list,
+    objective_concepts: dict,
+    model:              SentenceTransformer,
+    focus_terms:        list[str] = None,
+    threshold:          float = DOC_FALLBACK_THRESHOLD,
+) -> list[tuple]:
+    """
+    Recupera papers que NO entraron en ningún concepto tras la selección final
+    (porque su tema no se mapeó o porque los filtró el percentil/umbral).
+
+    Para cada candidato, calcula su similitud con los RQ objetivo y lo asigna
+    al más similar si supera `threshold`. Devuelve ``[(paper_id, concept_id,
+    score)]``.
+    """
+    if not corpus or threshold is None:
+        return []
+
+    by_concept = {int(a["concept_id"]): a for a in aligned_concepts}
+    selected = {
+        d.get("doc_id")
+        for a in aligned_concepts
+        for d in a.get("documents", [])
+    }
+    candidates = [
+        p for p in corpus
+        if p.get("paper_id") and p.get("paper_id") not in selected
+    ]
+    if not candidates:
+        return []
+
+    concept_list = objective_concepts["concepts"]
+    concept_ids = [int(c["id"]) for c in concept_list]
+    objective_texts = [build_objective_text(c, focus_terms) for c in concept_list]
+
+    obj_embs = model.encode(
+        objective_texts, normalize_embeddings=True,
+        convert_to_numpy=True, batch_size=32, show_progress_bar=False,
+    )
+    doc_embs = model.encode(
+        [_corpus_doc_text(p) for p in candidates], normalize_embeddings=True,
+        convert_to_numpy=True, batch_size=32, show_progress_bar=False,
+    )
+    sims = cosine_similarity(doc_embs, obj_embs)
+
+    added = []
+    for i, paper in enumerate(candidates):
+        best = select_best_objective(sims[i], concept_ids, threshold)
+        if best is None:
+            continue
+        concept_id, score = best
+        target = by_concept.get(concept_id)
+        if target is None:
+            continue
+        doc = {
+            "doc_id": paper.get("paper_id"),
+            "title": paper.get("title", ""),
+            "text": paper.get("clean_text") or paper.get("text") or "",
+            "section_text": "",
+        }
+        target.setdefault("documents", []).append(doc)
+        target.setdefault("document_scores", []).append(round(score, 4))
+        target["n_documents"] = len(target["documents"])
+        added.append((paper["paper_id"], concept_id, round(score, 3)))
+    return added
+
+
+# --------------------------------------------------
 # DOCUMENT AGGREGATION (usa topic_id)
 # --------------------------------------------------
 
@@ -531,6 +641,18 @@ def processConceptAlignment():
         objective_concepts, concept_map, discovered_concepts,
     )
 
+    # Fallback doc-level: recupera papers que no entraron por su tema (o que el
+    # percentil/umbral descartó) asignándolos al RQ objetivo más similar.
+    fallback_added: list[tuple] = []
+    if DOC_FALLBACK_ENABLED:
+        fallback_added = add_document_level_fallback(
+            aligned_concepts, corpus, objective_concepts, model,
+            focus_terms=focus_terms, threshold=DOC_FALLBACK_THRESHOLD,
+        )
+        writeLog("info", logger,
+                 f"[ConceptAlignment] Fallback doc-level: {len(fallback_added)} papers "
+                 f"recuperados (umbral doc-concepto >= {DOC_FALLBACK_THRESHOLD})")
+
     result = {
         "schema_version":       "1.5",
         "alignment_threshold":  ALIGNMENT_SCORE_THRESHOLD,
@@ -546,6 +668,12 @@ def processConceptAlignment():
         "aligned_concepts":     aligned_concepts,
         "alignments":           alignments,
         "section_weights_used": SECTION_WEIGHTS,
+        "doc_fallback": {
+            "enabled":   DOC_FALLBACK_ENABLED,
+            "threshold": DOC_FALLBACK_THRESHOLD,
+            "n_added":   len(fallback_added),
+            "added":     fallback_added,
+        },
     }
 
     save_alignment(output_dir, result)

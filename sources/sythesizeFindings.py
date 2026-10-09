@@ -206,6 +206,7 @@ class ConceptSynthesis:
     all_evidences: Tuple[Dict, ...]
     all_papers: Tuple[str, ...]
     aggregated_summary: Dict[str, Any] = field(default_factory=dict)
+    consensus: Tuple[Dict, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> Dict:
         return {
@@ -218,6 +219,7 @@ class ConceptSynthesis:
             "all_evidences": list(self.all_evidences),
             "all_papers": list(self.all_papers),
             "aggregated_summary": self.aggregated_summary,
+            "consensus": list(self.consensus),
         }
 
 
@@ -999,6 +1001,7 @@ class ConceptSynthesizer:
             all_evidences=tuple(all_evidences),
             all_papers=tuple(set(e["doc_id"] for e in all_evidences)),
             aggregated_summary=aggregated_summary,
+            consensus=tuple(concept_data.get("consensus", [])),
         )
 
     def _aggregate_evidences(self, clusters: List[Dict]) -> List[Dict]:

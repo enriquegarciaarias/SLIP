@@ -5,6 +5,7 @@ from sources.common.utils import inicioModulo
 import json
 from pathlib import Path
 import re
+import numbers
 from typing import List, Tuple, Optional, Dict, Set
 from collections import Counter
 
@@ -149,6 +150,28 @@ class POSFilterVectorizer(CountVectorizer):
             return tokens
 
         return tokenize
+
+    def _relax_df_for_small_corpus(self, n_doc: int) -> None:
+        """
+        sklearn exige `max_df >= min_df`. BERTopic ajusta este vectorizador sobre
+        una representación agregada por topic (`_c_tf_idf`), de modo que el número
+        de documentos es el de topics, que puede ser 1 o 2. En ese caso
+        `int(max_df * n_doc) < min_df` y CountVectorizer aborta con
+        "max_df corresponds to < documents than min_df". Relajamos los umbrales
+        solo en ese escenario extremo.
+        """
+        max_doc_count = self.max_df if isinstance(self.max_df, numbers.Integral) else self.max_df * n_doc
+        min_doc_count = self.min_df if isinstance(self.min_df, numbers.Integral) else self.min_df * n_doc
+        if max_doc_count < min_doc_count:
+            if isinstance(self.min_df, numbers.Integral):
+                self.min_df = 1
+            self.max_df = 1.0
+
+    def fit_transform(self, raw_documents, y=None):
+        if not hasattr(raw_documents, "__len__"):
+            raw_documents = list(raw_documents)
+        self._relax_df_for_small_corpus(len(raw_documents))
+        return super().fit_transform(raw_documents, y)
 
 
 def create_custom_vectorizer() -> CountVectorizer:

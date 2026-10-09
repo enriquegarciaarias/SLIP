@@ -445,6 +445,7 @@ class ExtractionResult:
     limitations: str = ""               # limitaciones
     usage:       str = ""               # dominio/contexto de uso (renombrado desde "aplicacion")
     solution:    str = ""               # contribución principal / solución propuesta
+    differential_contribution: str = ""  # aporte singular/diferencial del paper
 
     # ------------------------------------------------------------------
     # Propiedades de agrupación
@@ -472,6 +473,7 @@ class ExtractionResult:
             "limitations": self.limitations,
             "usage": self.usage,
             "solution": self.solution,
+            "differential_contribution": self.differential_contribution,
         }
 
     @property
@@ -481,7 +483,8 @@ class ExtractionResult:
             self.ideas, self.methods, self.results, self.applications,
             self.gap, self.evolutions,
             self.signals, self.models, self.metrics,
-            self.limitations, self.usage, self.solution
+            self.limitations, self.usage, self.solution,
+            self.differential_contribution,
         ])
 
     @property
@@ -500,11 +503,12 @@ class ExtractionResult:
             "limitations":  bool(self.limitations),
             "usage":        bool(self.usage),
             "solution":     bool(self.solution),
+            "differential_contribution": bool(self.differential_contribution),
         }
 
     @property
     def n_populated(self) -> int:
-        """Número de campos poblados (sobre 12 totales)."""
+        """Número de campos poblados (sobre 13 totales)."""
         return sum(self.section_coverage.values())
 
     def needs_llm_fallback(self, config: EnrichmentConfig) -> bool:
@@ -690,6 +694,9 @@ class LLMFallbackEnricher:
         "You are a structured information extractor for academic papers. "
         "Extract ONLY what is explicitly stated in the provided text. "
         "Do not infer, summarize, or add external knowledge. "
+        "Prioritize what is SPECIFIC and DIFFERENTIAL to this paper. "
+        "Ignore generic background/problem statements that apply to the whole "
+        "research field (they are already known and repeat across papers). "
         "Return a JSON object with these keys:\n"
         "  'gap'         : research gap identified (1-3 sentences, original language)\n"
         "  'evolutions'  : future work proposed (1-3 sentences, original language)\n"
@@ -699,6 +706,8 @@ class LLMFallbackEnricher:
         "  'limitations' : limitations of the study (1-2 sentences, original language)\n"
         "  'usage'       : application domain or use case context (1-2 sentences, original language)\n"
         "  'solution'    : main contribution or proposed solution (1-2 sentences, original language)\n"
+        "  'differential_contribution': what this paper uniquely adds versus the "
+        "state of the art (1-2 sentences, original language); empty if not stated\n"
         "Use empty string or empty list if information is not present."
     )
 
@@ -753,13 +762,16 @@ class LLMFallbackEnricher:
 
             prompt = (
                 f"Extract the following information from this academic text. "
+                f"Focus on what is specific/differential to this paper and skip "
+                f"generic background shared across the field.\n"
                 f"Return valid JSON with keys: gap, evolutions, signals, models, "
-                f"metrics, limitations, usage, solution.\n\n"
+                f"metrics, limitations, usage, solution, differential_contribution.\n\n"
                 f"Text:\n{context_text}\n\n"
                 f'Return JSON: {{"gap": "...", "evolutions": "...", '
                 f'"signals": [...], "models": [...], '
                 f'"metrics": {{...}}, "limitations": "...", '
-                f'"usage": "...", "solution": "..."}}'
+                f'"usage": "...", "solution": "...", '
+                f'"differential_contribution": "..."}}'
             )
 
             raw = llm.generate_json(
@@ -779,6 +791,7 @@ class LLMFallbackEnricher:
             limitations = str(raw.get("limitations", "")).strip()
             usage = str(raw.get("usage", "")).strip()
             solution = str(raw.get("solution", "")).strip()
+            differential = str(raw.get("differential_contribution", "")).strip()
 
             improved = ExtractionResult(
                 paper_id=result.paper_id,
@@ -794,6 +807,7 @@ class LLMFallbackEnricher:
                 limitations=limitations or result.limitations,
                 usage=usage or result.usage,
                 solution=solution or result.solution,
+                differential_contribution=differential or result.differential_contribution,
             )
             cache.update(result.paper_id, improved)
             processed += 1

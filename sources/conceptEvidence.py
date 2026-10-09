@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -83,6 +83,24 @@ class FilterConfig:
     intradoc_cluster_threshold: float = 0.40
 
 
+# Ponderación por sección para el scoring de evidencias (B). Favorece lo
+# diferencial (resultados/discusión/conclusión) frente a lo genérico
+# (introducción/abstract). Se aplica DESPUÉS de la identificación de conceptos,
+# sin alterar la membresía paper→concepto.
+DEFAULT_SECTION_EVIDENCE_WEIGHTS: Dict[str, float] = {
+    "results": 1.0,
+    "discussion": 0.9,
+    "conclusion": 0.9,
+    "methodology": 0.8,
+    "methods": 0.8,
+    "limitations": 0.7,
+    "introduction": 0.5,
+    "background": 0.5,
+    "abstract": 0.4,
+}
+DEFAULT_SECTION_WEIGHT = 0.7
+
+
 @dataclass
 class EvidenceConfig:
     """Configuración completa del módulo."""
@@ -93,13 +111,30 @@ class EvidenceConfig:
     # Configuración del expansor de queries (específica del módulo)
     expansion_max_terms: int = 7
     expansion_enabled: bool = True
+    # --- Genericidad / diferencialidad / consenso (A) ---
+    section_weights: Dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_SECTION_EVIDENCE_WEIGHTS)
+    )
+    default_section_weight: float = DEFAULT_SECTION_WEIGHT
+    genericity_penalty: float = 0.5      # w_gen (solo orden/reordenación, no filtro)
+    genericity_topk: int = 5             # nº de vecinos de otros papers a promediar
+    generic_threshold: float = 0.80      # genericidad cruda ≥ umbral → consenso
+    consensus_enabled: bool = True
+    consensus_cluster_threshold: float = 0.20  # distancia coseno para agrupar genéricos
     # NOTA: expansion_llm_model eliminado. Ahora se lee de processControl.defaults.llm
 
     @classmethod
     def from_project_config(cls, project: Dict) -> "EvidenceConfig":
-        """Construye la config desde el bloque 'project' de studyDescription.json."""
-        ev_cfg = project.get("evidence_extraction", {})
-        exp_cfg = project.get("query_expansion", {})
+        """Construye la config desde studyDescription.json, con config.json como base."""
+        defaults = getattr(processControl, "defaults", None) or {}
+        module_cfg = defaults.get("conceptEvidence", {}) if isinstance(defaults, dict) else {}
+        if not isinstance(module_cfg, dict):
+            module_cfg = {}
+        # studyDescription.json tiene prioridad sobre config.json.
+        ev_cfg = {**module_cfg, **project.get("evidence_extraction", {})}
+        exp_cfg = {**module_cfg.get("query_expansion", {}), **project.get("query_expansion", {})}
+        section_weights = dict(DEFAULT_SECTION_EVIDENCE_WEIGHTS)
+        section_weights.update(ev_cfg.get("section_weights", {}) or {})
         return cls(
             embedding_model_name=ev_cfg.get("embedding_model", "BAAI/bge-base-en-v1.5"),
             window=WindowConfig(
@@ -124,6 +159,13 @@ class EvidenceConfig:
             ),
             expansion_max_terms=exp_cfg.get("max_expansion_terms", 7),
             expansion_enabled=exp_cfg.get("enabled", True),
+            section_weights=section_weights,
+            default_section_weight=ev_cfg.get("default_section_weight", DEFAULT_SECTION_WEIGHT),
+            genericity_penalty=ev_cfg.get("genericity_penalty", 0.5),
+            genericity_topk=ev_cfg.get("genericity_topk", 5),
+            generic_threshold=ev_cfg.get("generic_threshold", 0.75),
+            consensus_enabled=ev_cfg.get("consensus_enabled", True),
+            consensus_cluster_threshold=ev_cfg.get("consensus_cluster_threshold", 0.85),
         )
 
     @classmethod
@@ -148,6 +190,8 @@ class Evidence:
     paper_title: str
     evidence_text: str
     similarity: float
+    section: str = ""
+    genericity: float = 0.0
 
     def to_dict(self) -> Dict:
         return {
@@ -155,6 +199,8 @@ class Evidence:
             "paper_title": self.paper_title,
             "evidence_text": self.evidence_text,
             "similarity": round(self.similarity, 4),
+            "section": self.section,
+            "genericity": round(self.genericity, 4),
         }
 
 
@@ -164,12 +210,14 @@ class ConceptEvidenceResult:
     concept_id: str
     concept_query: str
     knowledge_units: List[Evidence]
+    consensus: List[Dict] = field(default_factory=list)
 
     def to_dict(self) -> Dict:
         return {
             "concept_id": self.concept_id,
             "concept_query": self.concept_query,
             "knowledge_units": [e.to_dict() for e in self.knowledge_units],
+            "consensus": list(self.consensus),
         }
 
 
@@ -570,43 +618,73 @@ class DocumentEvidenceExtractor:
         query_embeddings: np.ndarray,
         primary_query_tokens: List[str],
         focus_terms: List[str],
+        sections: Optional[Dict[str, str]] = None,
     ) -> List[Evidence]:
         """
-        Extrae evidencias de un documento.
-        query_embeddings y primary_query_tokens se precalculan fuera
-        (una vez por concepto) y se reutilizan para todos los documentos.
+        Extrae evidencias de un documento, opcionalmente sobre TODAS sus
+        secciones (etiquetando cada ventana con su sección y ponderándola).
+
+        `sections` es el mapa sección→texto de papers_text.json (clean_sections).
+        Si no se aporta, se usa el texto alineado del documento (comportamiento
+        previo). La membresía paper→concepto no se altera: aquí solo se
+        "estruja" más texto del mismo paper.
         """
-        text = document.get("text", "")
-        # Defensivo: nunca generar ventanas de evidencia sobre bibliografía.
-        text = strip_reference_tail(text)
-        sentences = TextUtils.split_sentences(text, self._registry.nlp)
+        doc_id = document.get("doc_id", "unknown")
+        paper_title = document.get("title", "")
 
-        if len(sentences) < self._cfg.window.min_sentences:
-            return []
+        evidences: List[Evidence] = []
+        for section_name, section_text in self._iter_sections(document, sections):
+            text = strip_reference_tail(section_text)
+            sentences = TextUtils.split_sentences(text, self._registry.nlp)
+            if len(sentences) < self._cfg.window.min_sentences:
+                continue
 
-        windows = TextUtils.create_sliding_windows(sentences, self._cfg.window)
-        windows = [w for w in windows
-                   if not TextUtils.is_noise(w, self._cfg.window.min_words)]
-        if not windows:
-            return []
+            windows = TextUtils.create_sliding_windows(sentences, self._cfg.window)
+            windows = [w for w in windows
+                       if not TextUtils.is_noise(w, self._cfg.window.min_words)]
+            if not windows:
+                continue
 
-        scored = self._scorer.score_windows_full(
-            windows=windows,
-            query_embeddings=query_embeddings,
-            primary_query_tokens=primary_query_tokens,
-            focus_terms=focus_terms,
-        )
-
-        return [
-            Evidence(
-                doc_id=document["doc_id"],
-                paper_title=document.get("title", ""),
-                evidence_text=text,
-                similarity=score,
+            scored = self._scorer.score_windows_full(
+                windows=windows,
+                query_embeddings=query_embeddings,
+                primary_query_tokens=primary_query_tokens,
+                focus_terms=focus_terms,
             )
-            for text, score, _emb_score in scored
-            if score >= self._cfg.scoring.min_window_similarity
-        ]
+            weight = self._section_weight(section_name)
+            evidences.extend(
+                Evidence(
+                    doc_id=doc_id,
+                    paper_title=paper_title,
+                    evidence_text=window_text,
+                    similarity=score * weight,
+                    section=section_name,
+                )
+                for window_text, score, _emb_score in scored
+                if score >= self._cfg.scoring.min_window_similarity
+            )
+        return evidences
+
+    def _iter_sections(
+        self, document: Dict, sections: Optional[Dict[str, str]]
+    ) -> List[Tuple[str, str]]:
+        """Devuelve (sección, texto) a considerar. Prefiere las secciones reales."""
+        if sections:
+            return [(name, txt) for name, txt in sections.items() if txt]
+        text = document.get("text", "")
+        if not text:
+            return []
+        used = document.get("sections_used")
+        name = used[0] if isinstance(used, (list, tuple)) and used else "aligned"
+        return [(str(name), text)]
+
+    def _section_weight(self, section_name: str) -> float:
+        """Peso de la sección (B). Favorece lo diferencial frente a lo genérico."""
+        key = (section_name or "").lower()
+        for name, weight in self._cfg.section_weights.items():
+            if name in key:
+                return weight
+        return self._cfg.default_section_weight
 
 
 # ---------------------------------------------------------------------------
@@ -644,7 +722,8 @@ class ConceptProcessor:
     """
     Procesa un concepto completo:
     precalcula query embeddings → extrae evidencias por documento →
-    deduplica → clusteriza → filtra → devuelve ConceptEvidenceResult.
+    deduplica → clusteriza → penaliza genericidad → separa consenso →
+    filtra → devuelve ConceptEvidenceResult.
     """
 
     def __init__(
@@ -653,13 +732,22 @@ class ConceptProcessor:
         clusterer: IntraDocClusterer,
         evidence_filter: EvidenceFilter,
         query_cache: QueryEmbeddingCache,
+        registry: ModelRegistry,
+        config: EvidenceConfig,
     ) -> None:
         self._extractor = extractor
         self._clusterer = clusterer
         self._filter = evidence_filter
         self._cache = query_cache
+        self._registry = registry
+        self._cfg = config
 
-    def process(self, concept: Dict, focus_terms: List[str]) -> ConceptEvidenceResult:
+    def process(
+        self,
+        concept: Dict,
+        focus_terms: List[str],
+        sections_lookup: Optional[Dict[str, Dict[str, str]]] = None,
+    ) -> ConceptEvidenceResult:
         concept_id = str(concept.get("concept_id", "unknown"))
         primary_query = TextUtils.build_query(concept)
         expanded = concept.get("expanded_queries", [])
@@ -669,10 +757,10 @@ class ConceptProcessor:
         query_embeddings = self._cache.get(all_queries)   # (n_queries, dim)
         primary_tokens = TextUtils.tokenize_bm25(primary_query)
 
-        # Extraer evidencias por documento
-        all_evidences: List[Evidence] = []
-        doc_evidences_map: Dict[str, List[Evidence]] = {}
+        sections_lookup = sections_lookup or {}
 
+        # Extraer evidencias por documento (sobre TODAS sus secciones si están)
+        all_evidences: List[Evidence] = []
         for document in concept.get("documents", []):
             doc_id = document.get("doc_id", "unknown")
             evs = self._extractor.extract(
@@ -681,6 +769,7 @@ class ConceptProcessor:
                 query_embeddings=query_embeddings,
                 primary_query_tokens=primary_tokens,
                 focus_terms=focus_terms,
+                sections=sections_lookup.get(doc_id),
             )
             # Deduplicar por texto exacto dentro del documento
             seen_texts: set = set()
@@ -701,23 +790,121 @@ class ConceptProcessor:
 
             # Ordenar por similitud desc
             unique_evs.sort(key=lambda e: e.similarity, reverse=True)
-            doc_evidences_map[doc_id] = unique_evs
             all_evidences.extend(unique_evs)
 
-        # Filtro global (percentil + rescate + límite)
-        all_evidences.sort(key=lambda e: e.similarity, reverse=True)
-        final_evidences = self._filter.apply(all_evidences, doc_evidences_map)
+        # (A) Penalización de genericidad cross-paper + separación del consenso
+        all_evidences = self._annotate_genericity(all_evidences)
+        generic, differential = self._split_generic(all_evidences)
+        consensus = self._build_consensus(generic)
+
+        # Filtro global (percentil + rescate + límite) solo sobre lo diferencial
+        differential.sort(key=lambda e: e.similarity, reverse=True)
+        diff_doc_map: Dict[str, List[Evidence]] = defaultdict(list)
+        for ev in differential:
+            diff_doc_map[ev.doc_id].append(ev)
+        final_evidences = self._filter.apply(differential, diff_doc_map)
+        # Orden de presentación: relevancia penalizada por genericidad (solo orden).
+        final_evidences.sort(
+            key=lambda e: e.similarity - self._cfg.genericity_penalty * e.genericity,
+            reverse=True,
+        )
 
         writeLog("info", logger,
                  f"[ConceptProcessor] Concept {concept_id}: "
                  f"{len(final_evidences)} evidences from "
-                 f"{len(set(e.doc_id for e in final_evidences))} docs")
+                 f"{len(set(e.doc_id for e in final_evidences))} docs | "
+                 f"consensus: {len(consensus)} groups")
 
         return ConceptEvidenceResult(
             concept_id=concept_id,
             concept_query=primary_query,
             knowledge_units=final_evidences,
+            consensus=consensus,
         )
+
+    # ------------------------------------------------------------------
+    # Genericidad / consenso
+    # ------------------------------------------------------------------
+
+    def _annotate_genericity(self, evidences: List[Evidence]) -> List[Evidence]:
+        """
+        Calcula la "genericidad" de cada evidencia como su similitud media
+        (cruda, 0-1) a las ventanas de OTROS papers (top-k). Alta = texto que se
+        repite en el corpus (genérico).
+
+        NO modifica `similarity`: el filtro de relevancia debe seguir operando
+        sobre la señal original (la relevancia decide; la genericidad solo
+        reclasifica/ordena). Así no se reduce artificialmente el alcance.
+        """
+        n = len(evidences)
+        if n == 0:
+            return evidences
+
+        embeddings = self._registry.encode_batch([e.evidence_text for e in evidences])
+        sims = embeddings @ embeddings.T
+        doc_ids = [e.doc_id for e in evidences]
+        k = max(1, int(self._cfg.genericity_topk))
+
+        raw = np.zeros(n)
+        for i in range(n):
+            other = np.array([doc_ids[j] != doc_ids[i] for j in range(n)])
+            if not other.any():
+                raw[i] = 0.0
+                continue
+            row = np.sort(sims[i][other])[::-1]
+            top = row[:k]
+            raw[i] = float(top.mean()) if top.size else 0.0
+
+        return [replace(ev, genericity=float(gen)) for ev, gen in zip(evidences, raw)]
+
+    def _split_generic(
+        self, evidences: List[Evidence]
+    ) -> Tuple[List[Evidence], List[Evidence]]:
+        """Separa evidencias genéricas (→ consenso) de las diferenciales."""
+        if not self._cfg.consensus_enabled or self._cfg.generic_threshold >= 1.0:
+            return [], list(evidences)
+        generic = [e for e in evidences if e.genericity >= self._cfg.generic_threshold]
+        differential = [e for e in evidences if e.genericity < self._cfg.generic_threshold]
+        # Nunca vaciar el concepto: si todo es "genérico", mantenemos la evidencia.
+        if not differential:
+            return [], list(evidences)
+        return generic, differential
+
+    def _build_consensus(self, generic: List[Evidence]) -> List[Dict]:
+        """Agrupa las evidencias genéricas cross-paper y devuelve representantes."""
+        if not generic:
+            return []
+
+        texts = [e.evidence_text for e in generic]
+        embeddings = self._registry.encode_batch(texts)
+        if len(texts) == 1:
+            labels = np.array([0])
+        else:
+            clustering = AgglomerativeClustering(
+                n_clusters=None,
+                distance_threshold=self._cfg.consensus_cluster_threshold,
+                metric="cosine",
+                linkage="average",
+            )
+            labels = clustering.fit_predict(embeddings)
+
+        groups: Dict[int, List[Evidence]] = defaultdict(list)
+        for ev, label in zip(generic, labels):
+            groups[int(label)].append(ev)
+
+        consensus: List[Dict] = []
+        for evs in groups.values():
+            rep = max(evs, key=lambda e: e.similarity)
+            doc_ids = sorted({e.doc_id for e in evs})
+            consensus.append({
+                "representative_text": rep.evidence_text,
+                "section": rep.section,
+                "doc_ids": doc_ids,
+                "n_papers": len(doc_ids),
+                "genericity": round(max(e.genericity for e in evs), 4),
+            })
+        consensus.sort(key=lambda c: c["n_papers"], reverse=True)
+        return consensus
 
 
 # ---------------------------------------------------------------------------
@@ -774,6 +961,7 @@ class ConceptEvidencePipeline:
         aligned_concepts: Dict,
         focus_terms: List[str],
         output_file: Optional[Path] = None,
+        sections_lookup: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> Dict:
         """
         Ejecuta el pipeline completo y devuelve el resultado serializable.
@@ -784,7 +972,9 @@ class ConceptEvidencePipeline:
         for concept in aligned_concepts.get("aligned_concepts", []):
             writeLog("info", logger,
                      f"[Evidence] Processing concept {concept.get('concept_id')}")
-            results.append(self._processor.process(concept, focus_terms))
+            results.append(self._processor.process(
+                concept, focus_terms, sections_lookup=sections_lookup
+            ))
 
         output = {
             "schema_version": "2.0",
@@ -850,6 +1040,8 @@ def build_pipeline(config: EvidenceConfig) -> ConceptEvidencePipeline:
         clusterer=clusterer,
         evidence_filter=evidence_filter,
         query_cache=query_cache,
+        registry=registry,
+        config=config,
     )
 
     return ConceptEvidencePipeline(processor=processor, config=config)
@@ -870,6 +1062,28 @@ def _load_focus_terms(input_dir: Path) -> List[str]:
     except Exception as exc:
         writeLog("error", logger, f"[Evidence] Error loading focus_terms: {exc}")
         return []
+
+
+def _load_sections_lookup(output_dir: Path) -> Dict[str, Dict[str, str]]:
+    """Carga paper_id → {sección: texto} desde papers_text.json (clean_sections)."""
+    text_file = output_dir / "papers_text.json"
+    if not text_file.exists():
+        writeLog("warning", logger,
+                 f"[Evidence] {text_file} not found; using aligned doc text only")
+        return {}
+    try:
+        with open(text_file, "r", encoding="utf-8") as fh:
+            papers = json.load(fh)
+    except Exception as exc:
+        writeLog("warning", logger, f"[Evidence] Error loading papers_text.json: {exc}")
+        return {}
+    lookup: Dict[str, Dict[str, str]] = {}
+    for paper in papers:
+        pid = paper.get("paper_id")
+        sections = paper.get("clean_sections") or paper.get("sections")
+        if pid and isinstance(sections, dict) and sections:
+            lookup[pid] = {k: v for k, v in sections.items() if isinstance(v, str) and v}
+    return lookup
 
 
 # ---------------------------------------------------------------------------
@@ -893,10 +1107,14 @@ def processConceptEvidence() -> Optional[Dict]:
 
     config = EvidenceConfig.from_file(input_dir / "studyDescription.json")
     focus_terms = _load_focus_terms(input_dir)
+    sections_lookup = _load_sections_lookup(output_dir)
 
     writeLog("info", logger,
              f"[Evidence] Focus terms: {len(focus_terms)} | "
-             f"Expansion: {'enabled' if config.expansion_enabled else 'disabled'}")
+             f"Expansion: {'enabled' if config.expansion_enabled else 'disabled'} | "
+             f"Sections lookup: {len(sections_lookup)} papers | "
+             f"genericity_penalty={config.genericity_penalty} "
+             f"generic_threshold={config.generic_threshold}")
 
     # Expansión de queries via llm_client federado (lee LLM de processControl)
     aligned_concepts = _expand_queries(aligned_concepts, config)
@@ -907,6 +1125,7 @@ def processConceptEvidence() -> Optional[Dict]:
         aligned_concepts=aligned_concepts,
         focus_terms=focus_terms,
         output_file=output_dir / "concept_evidence.json",
+        sections_lookup=sections_lookup,
     )
 
 

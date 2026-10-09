@@ -9,6 +9,8 @@ Input:
     input/scopus_export.csv (Scopus)     → admite múltiples archivos: scopus_export*.csv
     input/ieee_export.csv (IEEE Xplore)  → admite múltiples archivos: ieee_export*.csv
     input/pubmed_export.txt (PubMed)     → admite múltiples archivos: pubmed_export*.txt
+    input/acm_export.* (ACM DL)          → CSV ';' con abstract truncado (se recupera)
+    input/arxiv_export.* (arXiv)         → CSV ';' con abstract truncado (se recupera)
     ...
 
 Output:
@@ -16,6 +18,8 @@ Output:
     output/scopus_search.json
     output/ieee_search.json
     output/pubmed_search.json
+    output/acm_search.json
+    output/arxiv_search.json
     ...
 
 Cada paper recibe un ID único por fuente: {source}_{n}
@@ -24,7 +28,7 @@ donde n es un entero incremental (1, 2, 3...) a través de TODOS los archivos de
 
 from sources.common.common import logger, processControl, writeLog
 from sources.common.dataManager import save_json
-from sources.common.utils import safe_int, normalized_title, sha1, normalize_text, normalize_doi, inicioModulo
+from sources.common.utils import safe_int, normalized_title, sha1, normalize_text, normalize_doi, needs_abstract_recovery, inicioModulo
 
 import csv
 import glob
@@ -603,6 +607,148 @@ def parse_pubmed_file(filepath, source_name="pubmed", start_index=1):
 
 
 # ==========================================================
+# ACM Digital Library parser (con start_index) - NUEVO
+# ==========================================================
+
+def _strip_header_keys(row: dict) -> dict:
+    """Normaliza las claves del CSV (ACM/arXiv exportan "Titulo " con espacio)."""
+    return {(k or "").strip(): (v or "").strip() for k, v in row.items()}
+
+
+def parse_acm_file(filepath, source_name="acm", start_index=1):
+    """
+    Parsea export de ACM DL en CSV con separador ';':
+        "#" ; "Titulo" ; "DOI" ; "Abstract"
+
+    El abstract suele venir truncado con '…'; se marca con `abstract_truncated`
+    para que `abstractRecovery` lo recupere por DOI vía OpenAlex.
+    """
+    papers = []
+    idx = start_index
+
+    with open(filepath, "r", encoding="utf-8-sig", errors="ignore") as csvfile:
+        reader = csv.DictReader(csvfile, delimiter=";", skipinitialspace=True)
+
+        for raw_row in reader:
+            if not raw_row:
+                continue
+            row = _strip_header_keys(raw_row)
+
+            title = normalize_text(row.get("Titulo", ""))
+            abstract = normalize_text(row.get("Abstract", ""))
+            doi = normalize_doi(row.get("DOI", ""))
+            url = row.get("URL", "")
+
+            if not title or len(title) < 5:
+                idx += 1
+                continue
+
+            landing_page = url or (f"https://doi.org/{doi}" if doi else None)
+
+            paper = {
+                "paper_id": build_source_paper_id(source_name, idx),
+                "source": source_name,
+                "source_index": idx,
+                "original_id": f"doi:{doi}" if doi else f"title:{sha1(normalized_title(title))}",
+                "doi": doi,
+                "title": title,
+                "abstract": abstract,
+                "abstract_truncated": needs_abstract_recovery(abstract),
+                "authors": [],
+                "keywords": [],
+                "year": None,
+                "venue": row.get("Proceedings", row.get("Venue", "")),
+                "document_type": "article",
+                "language": "English",
+                "references_count": None,
+                "citation_count": None,
+                "relevance_score": None,
+                "selected": False,
+                "has_full_text": False,
+                "raw_source_file": os.path.basename(filepath),
+                "pdf_url": None,
+                "landing_page": landing_page,
+            }
+
+            papers.append(paper)
+            idx += 1
+
+    writeLog("info", logger,
+             f"[ACM] Parsed {len(papers)} record(s) from {os.path.basename(filepath)}")
+    return papers
+
+
+# ==========================================================
+# arXiv parser (con start_index) - NUEVO
+# ==========================================================
+
+def parse_arxiv_file(filepath, source_name="arxiv", start_index=1):
+    """
+    Parsea export de arXiv en CSV con separador ';':
+        "#" ; "arXiv_ID" ; "Titulo" ; "URL" ; "Abstract"
+
+    El abstract suele venir truncado con '…'; se marca con `abstract_truncated`
+    para que `abstractRecovery` lo recupere por ID vía la API de arXiv.
+    """
+    papers = []
+    idx = start_index
+
+    with open(filepath, "r", encoding="utf-8-sig", errors="ignore") as csvfile:
+        reader = csv.DictReader(csvfile, delimiter=";", skipinitialspace=True)
+
+        for raw_row in reader:
+            if not raw_row:
+                continue
+            row = _strip_header_keys(raw_row)
+
+            title = normalize_text(row.get("Titulo", ""))
+            abstract = normalize_text(row.get("Abstract", ""))
+            arxiv_id = row.get("arXiv_ID", "").replace("arXiv:", "").strip()
+            url = row.get("URL", "")
+
+            if not title or len(title) < 5:
+                idx += 1
+                continue
+
+            pdf_url = None
+            if url and "/abs/" in url:
+                pdf_url = url.replace("/abs/", "/pdf/")
+
+            paper = {
+                "paper_id": build_source_paper_id(source_name, idx),
+                "source": source_name,
+                "source_index": idx,
+                "original_id": f"arxiv:{arxiv_id}" if arxiv_id else f"title:{sha1(normalized_title(title))}",
+                "doi": "",
+                "title": title,
+                "abstract": abstract,
+                "abstract_truncated": needs_abstract_recovery(abstract),
+                "arxiv_id": arxiv_id if arxiv_id else None,
+                "authors": [],
+                "keywords": [],
+                "year": None,
+                "venue": "arXiv",
+                "document_type": "preprint",
+                "language": "English",
+                "references_count": None,
+                "citation_count": None,
+                "relevance_score": None,
+                "selected": False,
+                "has_full_text": False,
+                "raw_source_file": os.path.basename(filepath),
+                "pdf_url": pdf_url,
+                "landing_page": url or (f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else None),
+            }
+
+            papers.append(paper)
+            idx += 1
+
+    writeLog("info", logger,
+             f"[arXiv] Parsed {len(papers)} record(s) from {os.path.basename(filepath)}")
+    return papers
+
+
+# ==========================================================
 # Parser genérico (para futuras fuentes)
 # ==========================================================
 
@@ -615,7 +761,8 @@ def parse_generic_file(filepath, source_name, parser_type="csv"):
 # Función principal unificada (AHORA SOPORTA MÚLTIPLES ARCHIVOS)
 # ==========================================================
 
-def process_source(known_source: str, file_pattern: str, input_dir: Path, output_dir: Path):
+def process_source(known_source: str, file_pattern: str, input_dir: Path, output_dir: Path,
+                   search_config: dict = None):
     """
     Procesa una fuente de datos según su tipo.
     AHORA SOPORTA MÚLTIPLES ARCHIVOS que coincidan con file_pattern.
@@ -641,6 +788,10 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
             data = parse_ieee_file(filepath, known_source, start_index=global_index)
         elif known_source == "pubmed":
             data = parse_pubmed_file(filepath, known_source, start_index=global_index)
+        elif known_source == "acm":
+            data = parse_acm_file(filepath, known_source, start_index=global_index)
+        elif known_source == "arxiv":
+            data = parse_arxiv_file(filepath, known_source, start_index=global_index)
         else:
             data = parse_generic_file(filepath, known_source)
 
@@ -650,6 +801,15 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
             all_data.extend(data)
 
     if all_data:
+        # ACM/arXiv exportan abstracts truncados: recuperarlos antes de persistir.
+        if known_source in ("acm", "arxiv"):
+            try:
+                from sources.abstractRecovery import recover_abstracts
+                recover_abstracts(all_data, known_source, search_config or {})
+            except Exception as exc:  # noqa: BLE001 - no abortar la normalización
+                writeLog("exception", logger,
+                         f"[{known_source.upper()}] Falló la recuperación de abstracts: {exc}")
+
         output_file = output_dir / f"{known_source}_search.json"
         save_json(all_data, output_file)
         writeLog("info", logger, f"[{known_source.upper()}] {len(all_data)} papers saved to {output_file}")
@@ -703,7 +863,7 @@ def processNormalizeSearchResults():
             writeLog("warning", logger, f"No file pattern defined for source: {source}")
             continue
 
-        data = process_source(source, file_pattern, input_dir, output_dir)
+        data = process_source(source, file_pattern, input_dir, output_dir, search_config)
         if data:
             results[source] = data
 

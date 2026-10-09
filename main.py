@@ -8,7 +8,8 @@ from sources.common.paramsManager import getConfigs
 
 def mainProcess():
     """
-    """
+
+
     from sources.normalizeSearchResults import processNormalizeSearchResults
     # -> wos_search.json + scopus_search.json
     processNormalizeSearchResults()
@@ -73,7 +74,7 @@ def mainProcess():
     from sources.enrich_evidences import processEnrichEvidences
     processEnrichEvidences()
 
-
+    """
     from sources.sythesizeFindings import processSynthesizeFindings
     # enriched_evidences.json -> concept_findings.json
     processSynthesizeFindings()

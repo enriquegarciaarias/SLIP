@@ -4,11 +4,13 @@
       "huggingFaceToken": "REEMPLAZAR_CON_TU_TOKEN_DE_HUGGING_FACE",
       "modelNames": {},
       "search": {
-        "availables": ["wos", "scopus", "ieee", "pubmed"],
+        "availables": ["wos", "scopus", "ieee", "pubmed", "acm", "arxiv"],
         "wos": "wos_export.txt",
         "scopus": "scopus_export.csv",
         "ieee": "ieee_export.csv",
         "pubmed": "pubmed_export.txt",
+        "acm": "acm_export.*",
+        "arxiv": "arxiv_export.*",
         "query_source": "conceptsQuery.json",
         "refresh": false,
         "max_results": 500,
@@ -44,7 +46,19 @@
             "email": "REEMPLAZAR_CON_TU_EMAIL",
             "page_size": 200,
             "sort": "relevance_score:desc"
+          },
+          "acm": {
+            "mode": "file",
+            "email": "REEMPLAZAR_CON_TU_EMAIL"
+          },
+          "arxiv": {
+            "mode": "file"
           }
+        },
+        "abstract_recovery": {
+          "enabled": true,
+          "arxiv_fallback": true,
+          "arxiv_batch_size": 50
         },
         "merge": {
           "by_title_only_min_chars": 25
@@ -113,7 +127,30 @@
         "rerank_score_weight": 0.7,
         "min_docs_per_concept": 5,
         "max_docs_per_concept": 60,
-        "min_rerank_score": 0.45
+        "min_rerank_score": 0.45,
+        "min_study_similarity": 0.0,
+        "doc_fallback_enabled": true,
+        "doc_fallback_threshold": 0.45
+      },
+      "conceptEvidence": {
+        "embedding_model": "BAAI/bge-base-en-v1.5",
+        "section_weights": {
+          "results": 1.0,
+          "discussion": 0.9,
+          "conclusion": 0.9,
+          "methodology": 0.8,
+          "methods": 0.8,
+          "limitations": 0.7,
+          "introduction": 0.5,
+          "background": 0.5,
+          "abstract": 0.4
+        },
+        "default_section_weight": 0.7,
+        "genericity_penalty": 0.5,
+        "genericity_topk": 5,
+        "generic_threshold": 0.8,
+        "consensus_enabled": true,
+        "consensus_cluster_threshold": 0.2
       },
       "clusterEvidences": {
         "embedding_model": "BAAI/bge-base-en-v1.5",

@@ -95,6 +95,10 @@ class HttpClient:
                         f"HTTP {response.status_code} en {url}: revisa API key/entitlement"
                     )
 
+                if response.status_code == 404:
+                    # No tiene sentido reintentar: el recurso no existe.
+                    raise IngestionError(f"HTTP 404 en {url}: recurso no encontrado")
+
                 if response.status_code in self._RETRYABLE_STATUS:
                     wait = self.backoff * (attempt + 1)
                     writeLog(

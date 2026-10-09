@@ -32,7 +32,9 @@ Principios aplicados:
 from __future__ import annotations
 
 import json
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -50,22 +52,219 @@ from sources.common.utils import inicioModulo
 
 @dataclass
 class ExtractionField:
-    """Define un campo a extraer del paper."""
+    """
+    Define un campo a extraer del paper.
+
+    `description` es una INSTRUCCIÓN de qué buscar en el paper, nunca un valor
+    de ejemplo: el prompt la usa como guía y los modelos pequeños tienden a
+    copiarla si contiene la respuesta. Los valores típicos/admitidos van en
+    `examples`, que el prompt presenta aparte como vocabulario (hints), jamás
+    como salida esperada.
+    """
     name: str
     description: str
     type: str = "string"        # "string" | "list"
+    examples: List[str] = field(default_factory=list)
+    # Mapa sinonimo -> etiqueta canónica (p. ej. inglés -> español). Se aplica
+    # de forma determinista TRAS la extracción; nunca se inyecta en el prompt.
+    aliases: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict) -> "ExtractionField":
+        raw_examples = data.get("examples") or []
+        if isinstance(raw_examples, str):
+            raw_examples = [raw_examples]
+        raw_aliases = data.get("aliases") or {}
+        if not isinstance(raw_aliases, dict):
+            raw_aliases = {}
         return cls(
             name=data["name"],
             description=data.get("description", ""),
             type=data.get("type", "string"),
+            examples=[str(e) for e in raw_examples],
+            aliases={str(k): str(v) for k, v in raw_aliases.items()},
         )
 
     @property
     def is_list(self) -> bool:
         return self.type == "list"
+
+
+# Valores centinela: salidas legítimas de "no hay nada" que nunca deben
+# contarse como eco de la lista de ejemplos.
+_SENTINEL_ECHO_VALUES = {
+    "no evaluada", "no evaluado", "no evaluadas", "no evaluados",
+    "no aplicado", "no aplicada", "no aplicable", "no se evalua",
+    "no reportado", "no reportada", "no especificado", "no especificada",
+    "not evaluated", "not applicable", "not reported", "not assessed",
+    "none", "ninguno", "ninguna", "na", "n a", "unknown", "desconocido",
+}
+
+
+_SPANISH_MARKS = set("áéíóúüñ")
+
+
+def _normalize_for_compare(text) -> str:
+    """Minúsculas, sin acentos ni signos, espacios colapsados."""
+    text = unicodedata.normalize("NFKD", str(text).lower())
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _is_discriminative_example(raw_example) -> bool:
+    """
+    Un ejemplo es "discriminativo de idioma" si tiene marca (acento/ñ) o varias
+    palabras. Los tokens neutros (EEG, AUC, WESAD, DEAP, ECG...) NO son
+    discriminativos: pueden ser extracciones legítimas y no deben disparar el
+    eco por sí solos.
+    """
+    raw = str(raw_example)
+    if any(ch.lower() in _SPANISH_MARKS for ch in raw):
+        return True
+    return bool(re.search(r"\s", raw.strip()))
+
+
+def classify_echo(value, field: "ExtractionField") -> tuple:
+    """
+    Clasifica si el valor extraído es un eco de la descripción/ejemplos.
+
+    Devuelve ``(kind, cleaned_value)`` con ``kind`` en:
+      - ``"none"``    : valor legítimo (se deja igual).
+      - ``"full"``    : eco puro -> el campo se resetea (``[]`` / ``None``).
+      - ``"partial"`` : eco mixto -> ``cleaned_value`` conserva los items que
+                        NO son ejemplos discriminativos.
+
+    Reglas (conservadoras, solo cuentan ejemplos discriminativos):
+      * eco de la descripción (como antes);
+      * conjunto exactamente igual al vocabulario completo de ejemplos;
+      * subconjunto puro: ningún item propio y >=2 ejemplos discriminativos;
+      * mixto: >=2 ejemplos discriminativos y algún item propio -> poda;
+      * colapso en un único string con >=2 ejemplos discriminativos.
+    Los centinelas ("no evaluada", ...) no cuentan como coincidencia.
+    """
+    is_list = isinstance(value, list)
+    raw_items = list(value) if is_list else [value]
+    norm_items = [_normalize_for_compare(v) for v in raw_items]
+    norm_items = [n for n in norm_items if n]
+    reset_value = [] if is_list else None
+
+    # 1) Eco de la descripción.
+    desc = _normalize_for_compare(field.description)
+    for n in norm_items:
+        if desc and n == desc:
+            return "full", reset_value
+        if len(n) >= 40 and desc and (n in desc or desc in n):
+            return "full", reset_value
+
+    if not (field.is_list and field.examples):
+        return "none", value
+
+    example_norms = [_normalize_for_compare(e) for e in field.examples]
+    example_norms = [e for e in example_norms if e]
+    all_examples = set(example_norms)
+    substantive = set(example_norms) - _SENTINEL_ECHO_VALUES
+
+    # Solo los ejemplos multi-palabra o con diacríticos pueden delatar el eco.
+    disc_norms = {
+        _normalize_for_compare(raw)
+        for raw in field.examples
+        if _is_discriminative_example(raw)
+    }
+    disc_norms = {e for e in disc_norms if e and e in substantive}
+    if not disc_norms:
+        return "none", value
+
+    # 2) Conjunto exactamente igual al vocabulario completo de ejemplos.
+    if set(norm_items) == all_examples:
+        return "full", reset_value
+
+    # 3) Colapso en un único string con TODOS los ejemplos discriminativos
+    #    (solo si hay >=2, para no borrar una única categoría legítima).
+    joined = " | ".join(norm_items)
+    disc_hits = [e for e in disc_norms if e in joined]
+    if len(disc_norms) >= 2 and len(norm_items) == 1 and len(disc_hits) == len(disc_norms):
+        return "full", reset_value
+
+    if is_list:
+        substantive_items = [n for n in norm_items if n not in _SENTINEL_ECHO_VALUES]
+        matched = [n for n in substantive_items if n in disc_norms]
+        genuine = [n for n in substantive_items if n not in all_examples]
+
+        # 4) Subconjunto puro: ningún item propio y >=2 ejemplos discriminativos.
+        if len(matched) >= 2 and not genuine:
+            return "full", reset_value
+        # 5) Eco mixto: podar SOLO los ejemplos discriminativos; conservar
+        #    los tokens neutros (EEG, AUC) y los valores propios del paper.
+        if len(matched) >= 2 and genuine:
+            cleaned = [
+                raw for raw, n in zip(raw_items, norm_items) if n not in disc_norms
+            ]
+            return "partial", cleaned
+        # 6) Colapso parcial: un único string con >=2 ejemplos embebidos.
+        if len(norm_items) == 1 and len(disc_hits) >= 2:
+            return "full", reset_value
+    else:
+        # 7) String único que embebe >=2 ejemplos discriminativos.
+        if len(disc_hits) >= 2:
+            return "full", reset_value
+
+    return "none", value
+
+
+def canonicalize_value(value, field: "ExtractionField"):
+    """
+    Canonicaliza deterministamente la salida del LLM usando `field.examples`
+    como etiquetas canónicas y `field.aliases` como mapa sinónimo -> etiqueta.
+
+    El vocabulario NO se envía al prompt (Capa 2): el modelo extrae texto libre
+    en el idioma del paper y aquí se normaliza. Los ítems sin coincidencia se
+    conservan tal cual (texto libre).
+    """
+    if not field.examples:
+        return value
+
+    # Etiquetas canónicas (match exacto) y alias (exacto + contención).
+    labels_norm: Dict[str, str] = {}
+    for label in field.examples:
+        labels_norm.setdefault(_normalize_for_compare(label), label)
+
+    exact_aliases: Dict[str, str] = {}
+    partial_aliases = []  # (clave_normalizada, etiqueta)
+    for alias, label in (field.aliases or {}).items():
+        key = _normalize_for_compare(alias)
+        if not key:
+            continue
+        exact_aliases[key] = label
+        if len(key) >= 4:
+            partial_aliases.append((key, label))
+    partial_aliases.sort(key=lambda kv: len(kv[0]), reverse=True)
+
+    def _canon(item):
+        n = _normalize_for_compare(item)
+        if not n:
+            return item
+        if n in labels_norm:
+            return labels_norm[n]
+        if n in exact_aliases:
+            return exact_aliases[n]
+        for key, label in partial_aliases:
+            if re.search(rf"\b{re.escape(key)}\b", n):
+                return label
+        return item
+
+    if isinstance(value, list):
+        seen, result = set(), []
+        for item in value:
+            mapped = _canon(item)
+            key = _normalize_for_compare(mapped)
+            if key and key not in seen:
+                seen.add(key)
+                result.append(mapped)
+        return result
+    if isinstance(value, str):
+        return _canon(value)
+    return value
 
 
 @dataclass
@@ -209,6 +408,7 @@ class TechnicalProfileExtractor:
     """
 
     # Secciones del paper en orden de preferencia
+    _BACKGROUND_KEYS = ("abstract", "introduction")
     _METHODOLOGY_KEYS = ("methodology", "methods", "approach", "materials")
     _RESULTS_KEYS = ("results", "experiments", "evaluation", "discussion")
 
@@ -231,8 +431,8 @@ class TechnicalProfileExtractor:
                      f"[Extractor] No extraction fields configured for {paper_id}")
             return TechnicalProfile(paper_id=paper_id, title=title, profile={})
 
-        methodology, results = self._select_sections(paper)
-        prompt = self._build_prompt(title, methodology, results)
+        background, methodology, results = self._select_sections(paper)
+        prompt = self._build_prompt(title, background, methodology, results)
 
         # Se inyectan max_tokens y temperature específicos de extracción técnica
         raw_profile = self._llm.generate_json(
@@ -245,22 +445,27 @@ class TechnicalProfileExtractor:
         )
 
         profile = self._coerce_field_types(raw_profile)
+        profile = self._canonicalize_fields(profile)
+        profile = self._drop_echoed_fields(profile)
         return TechnicalProfile(paper_id=paper_id, title=title, profile=profile)
 
     # ------------------------------------------------------------------
     # Helpers privados
     # ------------------------------------------------------------------
 
-    def _select_sections(self, paper: Dict) -> tuple[str, str]:
+    def _select_sections(self, paper: Dict) -> tuple[str, str, str]:
         """
-        Extrae las secciones de metodología y resultados del paper.
-        Fallback al texto completo si no hay secciones estructuradas.
+        Extrae las secciones de contexto (abstract/introducción), metodología y
+        resultados del paper. Fallback al texto completo si no hay secciones.
         """
         # papers_text.json expone las secciones como `clean_sections`; se admite
         # `sections` por compatibilidad con versiones antiguas del contrato.
         sections = paper.get("clean_sections") or paper.get("sections", {})
         limit = self._config.max_section_chars
 
+        background = " ".join(
+            sections[k] for k in self._BACKGROUND_KEYS if sections.get(k)
+        )
         methodology = next(
             (sections[k] for k in self._METHODOLOGY_KEYS if sections.get(k)), ""
         )
@@ -272,30 +477,49 @@ class TechnicalProfileExtractor:
             full = paper.get("full_text", "") or paper.get("clean_text", "")
             methodology = full[:limit]
 
-        return methodology[:limit], results[:limit]
+        return background[:limit], methodology[:limit], results[:limit]
 
-    def _build_prompt(self, title: str, methodology: str, results: str) -> str:
-        """Construye el prompt dinámicamente a partir de los campos configurados."""
-        schema_lines = []
+    def _build_prompt(
+        self, title: str, background: str, methodology: str, results: str
+    ) -> str:
+        """
+        Construye el prompt dinámicamente a partir de los campos configurados.
+
+        El esquema usa placeholders neutros y las descripciones se presentan
+        como guía aparte, con la prohibición explícita de copiarlas. Así se evita
+        el fallo observado: modelos pequeños devolvían la descripción del campo
+        (o sus valores de ejemplo) como si fuera el valor extraído.
+        """
+        schema_lines, guidance_lines = [], []
         for f in self._config.extraction_fields:
             if f.is_list:
-                schema_lines.append(
-                    f'  "{f.name}": ["list of strings describing {f.description}"]'
-                )
+                schema_lines.append(f'  "{f.name}": ["<string>", ...]')
+                kind = "list of strings"
             else:
-                schema_lines.append(
-                    f'  "{f.name}": "string describing {f.description}"'
-                )
+                schema_lines.append(f'  "{f.name}": "<string or null>"')
+                kind = "string"
+            # Capa 2: NO se inyectan los `examples` (vocabulario canónico) en el
+            # prompt; el modelo extrae texto libre y se canonicaliza después.
+            guidance_lines.append(f"- {f.name} ({kind}): {f.description}")
+
         json_schema = "{\n" + ",\n".join(schema_lines) + "\n}"
+        fields_guidance = "\n".join(guidance_lines)
 
         return (
-            f"Extract the following fields from this academic paper and return ONLY a valid JSON object.\n\n"
+            "Extract the following fields from this academic paper and return ONLY a valid JSON object.\n\n"
             f"**Title:** {title}\n\n"
+            f"**Background (Abstract / Introduction):**\n{background}\n\n"
             f"**Methodology / Materials & Methods:**\n{methodology}\n\n"
             f"**Results / Experiments:**\n{results}\n\n"
-            f"**Required JSON structure:**\n{json_schema}\n\n"
+            f"**Required JSON structure (keys and types only):**\n{json_schema}\n\n"
+            f"**Field guidance (what each field means; DO NOT copy this text):**\n"
+            f"{fields_guidance}\n\n"
             f"Rules:\n"
+            f"- Base every value ONLY on the paper text above. Do not use outside knowledge.\n"
+            f"- NEVER output the field guidance/description text as a value.\n"
             f"- Use null for missing string fields, [] for missing list fields.\n"
+            f"- For list fields, include an item only if the paper explicitly supports it.\n"
+            f"- Keep values in the language of the paper.\n"
             f"- Output the JSON object only. No explanation, no markdown fences.\n\n"
             f"JSON:"
         )
@@ -312,6 +536,54 @@ class TechnicalProfileExtractor:
                              f"[Extractor] Field '{f.name}' expected list, got "
                              f"{type(profile[f.name]).__name__}; resetting to []")
                     profile[f.name] = []
+        return profile
+
+    def _canonicalize_fields(self, profile: Dict) -> Dict:
+        """
+        Canonicaliza deterministamente los valores usando los `examples` como
+        etiquetas y `aliases` como sinónimos. No toca la red (Capa 2).
+        """
+        for f in self._config.extraction_fields:
+            if f.name in profile and profile[f.name] is not None:
+                profile[f.name] = canonicalize_value(profile[f.name], f)
+        return profile
+
+    # ------------------------------------------------------------------
+    # Salvaguarda anti-eco
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        """Compatibilidad: delega en el normalizador del módulo."""
+        return _normalize_for_compare(text)
+
+    def _is_echo(self, value, f: ExtractionField) -> bool:
+        """True si el valor devuelto es un eco de la descripción o ejemplos."""
+        kind, _ = classify_echo(value, f)
+        return kind != "none"
+
+    def _drop_echoed_fields(self, profile: Dict) -> Dict:
+        """
+        Resetea/poda campos cuyo valor es un eco de su descripción/ejemplos.
+
+        Red de seguridad frente a modelos que, pese a las reglas del prompt,
+        devuelven el vocabulario de ejemplos como valor extraído. Detecta eco
+        puro (reset) y eco mixto (poda de los items que son ejemplos textuales).
+        """
+        for f in self._config.extraction_fields:
+            if f.name not in profile:
+                continue
+            kind, cleaned = classify_echo(profile[f.name], f)
+            if kind == "full":
+                writeLog("warning", logger,
+                         f"[Extractor] Echo detected in '{f.name}': value repeats "
+                         f"the field description/examples; resetting")
+                profile[f.name] = [] if f.is_list else None
+            elif kind == "partial":
+                writeLog("warning", logger,
+                         f"[Extractor] Partial echo in '{f.name}': pruning "
+                         f"example items, keeping extracted specifics")
+                profile[f.name] = cleaned
         return profile
 
 
@@ -522,6 +794,84 @@ def build_pipeline(
     selector = PaperSelector(findings_data=findings_data)
 
     return TechnicalAnnexPipeline(config=config, extractor=extractor, selector=selector)
+
+
+# ---------------------------------------------------------------------------
+# Auditoría anti-eco (dry-run, sin modificar nada)
+# ---------------------------------------------------------------------------
+
+def audit_echoes(input_dir: Path, output_dir: Path) -> Dict:
+    """
+    Informe *dry-run* de ecos en un `technical_annex.json` ya generado.
+
+    No modifica nada: clasifica cada campo de cada perfil con `classify_echo`
+    e imprime los sospechosos para revisión manual antes de aplicar los
+    reseteos/podas.
+    """
+    config = AnnexConfig.from_file(Path(input_dir) / "studyDescription.json")
+    fields = {f.name: f for f in config.extraction_fields}
+
+    annex_path = Path(output_dir) / "technical_annex.json"
+    if not annex_path.exists():
+        writeLog("error", logger, f"[EchoAudit] No existe {annex_path}")
+        return {}
+
+    with open(annex_path, "r", encoding="utf-8") as fh:
+        annex = json.load(fh)
+
+    seen_papers = {}
+    findings = []  # (paper_id, title, field, kind, value)
+    for concept in annex.get("concepts", []):
+        for paper in concept.get("papers", []):
+            pid = paper.get("paper_id")
+            if pid in seen_papers:
+                continue
+            seen_papers[pid] = paper.get("title", "")
+            profile = paper.get("profile", {}) or {}
+            for name, value in profile.items():
+                field = fields.get(name)
+                if field is None:
+                    continue
+                kind, cleaned = classify_echo(value, field)
+                if kind != "none":
+                    findings.append({
+                        "paper_id": pid,
+                        "title": paper.get("title", ""),
+                        "field": name,
+                        "kind": kind,
+                        "value": value,
+                        "cleaned": cleaned,
+                    })
+
+    by_field: Dict[str, Dict[str, int]] = {}
+    for f in findings:
+        bucket = by_field.setdefault(f["field"], {"full": 0, "partial": 0})
+        bucket[f["kind"]] += 1
+
+    print("\n" + "=" * 72)
+    print(f"AUDITORÍA ANTI-ECO  (dry-run) · {len(seen_papers)} papers únicos")
+    print("=" * 72)
+    if not findings:
+        print("Sin ecos detectados.")
+    for name, counts in sorted(by_field.items()):
+        print(f"  {name}: {counts['full']} reset · {counts['partial']} poda parcial")
+    print("-" * 72)
+    for f in findings:
+        action = "RESET" if f["kind"] == "full" else "PODA "
+        print(f"[{action}] {f['field']}  ({f['paper_id']})")
+        print(f"         {f['title'][:80]}")
+        print(f"         valor: {f['value']}")
+        if f["kind"] == "partial":
+            print(f"         conserva: {f['cleaned']}")
+    print("=" * 72 + "\n")
+
+    report = {
+        "papers": len(seen_papers),
+        "n_findings": len(findings),
+        "by_field": by_field,
+        "findings": findings,
+    }
+    return report
 
 
 # ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ def manageArgs():
     @Result: Returns parsed arguments as a Namespace object.
     """
     parser = argparse.ArgumentParser(description="Main process for Scientific Literature Intelligence Pipeline (SLIP) handling.")
-    parser.add_argument('--subject', type=str, help="Subject of investigation: sensores, AERAprompt", default="AERASOA")
+    parser.add_argument('--subject', type=str, help="Subject of investigation: sensores, AERAprompt", default="SensoresACL")
     parser.add_argument('--proc', type=str, help="Process type: proc", default="SLIP")
     parser.add_argument('--manuscript', type=int, choices=[0, 1], default=None,
                         help="1 = integra el manuscrito del investigador (manual_papers/manuscript/) "

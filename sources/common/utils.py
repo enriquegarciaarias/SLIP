@@ -131,6 +131,17 @@ def normalize_text(text):
     return text.strip()
 
 
+def needs_abstract_recovery(text):
+    """
+    Indica si un abstract está ausente o truncado. Los exports de ACM/arXiv
+    recortan el texto terminándolo con '…' (elipsis Unicode) o con '...'.
+    """
+    if not text:
+        return True
+    stripped = text.rstrip()
+    return "\u2026" in text or stripped.endswith("...")
+
+
 def normalize_doi(doi):
     """
     Normaliza un DOI para comparación/deduplicación:
