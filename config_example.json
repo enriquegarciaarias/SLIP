@@ -66,7 +66,9 @@
         "decomposition": {
           "enabled": false,
           "sources": ["pubmed"]
-        }
+        },
+        "streams": {},
+        "_streams_help": "Opcional. Flujos de búsqueda con nombre, cada uno con query/sources/max_results/top_k/ranking_query propios. Si está vacío se usa un flujo único legacy (availables + query global). Ej.: {\"physio\": {\"sources\": [...], \"max_results\": 500}, \"nlp\": {\"query\": \"LLM AND (calibration OR hallucination OR faithfulness)\", \"queries\": {\"scopus\": \"TITLE-ABS-KEY(...)\"}, \"sources\": [\"openalex\", \"scopus\", \"acm\", \"arxiv\"], \"max_results\": 200, \"top_k\": 60, \"ranking_query\": \"LLM reliability evaluation\"}}"
       },
       "llm": {
         "primary_model": "qwen3:8b",

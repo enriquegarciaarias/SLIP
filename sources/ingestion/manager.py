@@ -19,6 +19,7 @@ El resto del pipeline no cambia: sigue consumiendo `{source}_search.json`.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -32,6 +33,7 @@ from sources.ingestion.base import (
     SearchProvider,
     SnapshotStore,
 )
+from sources.common.streams import load_streams, stream_sources
 from sources.ingestion.ieee_provider import IeeeProvider
 from sources.ingestion.openalex_provider import OpenAlexProvider
 from sources.ingestion.pubmed_provider import PubmedProvider
@@ -92,16 +94,29 @@ def _fetch_and_normalize(
 
 
 def _dedup_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Deduplica dentro de la fuente por identidad canónica (doi/pmid/título)."""
-    seen = set()
-    unique: List[Dict[str, Any]] = []
+    """Deduplica dentro de la fuente por identidad canónica (doi/pmid/título).
+
+    Si un mismo registro aparece en varios flujos, se conserva uno y se
+    acumulan sus nombres en `query_streams`.
+    """
+    by_key: Dict[Any, Dict[str, Any]] = {}
+    order: List[Any] = []
     for record in records:
         key = record.get("original_id") or record.get("source_id") or id(record)
-        if key in seen:
+        if key in by_key:
+            first = by_key[key]
+            streams = set(first.get("query_streams") or [])
+            streams |= set(record.get("query_streams") or [])
+            if record.get("query_stream"):
+                streams.add(record["query_stream"])
+            if first.get("query_stream"):
+                streams.add(first["query_stream"])
+            if streams:
+                first["query_streams"] = sorted(streams)
             continue
-        seen.add(key)
-        unique.append(record)
-    return unique
+        by_key[key] = record
+        order.append(key)
+    return [by_key[key] for key in order]
 
 
 def run_api_ingestion(
@@ -114,74 +129,83 @@ def run_api_ingestion(
     Devuelve un dict {source: records} solo para las fuentes que se han
     resuelto por API; el llamador usa modo file para el resto.
     """
-    availables = search_config.get("availables", [])
+    streams = load_streams(search_config)
+    all_sources = stream_sources(streams)
     refresh = bool(search_config.get("refresh", False))
-    max_results = int(search_config.get("max_results", 500))
     raw_root = Path(input_dir) / "_raw"
 
     if not any(
         (search_config.get("providers", {}) or {}).get(s, {}).get("mode") == "api"
-        for s in availables
+        for s in all_sources
     ):
         return {}
-
-    # Query decomposition: además de la query global de la fuente, lanzar una
-    # consulta por pregunta de investigación (conceptsQuery.json > concepts[]).
-    decomp_cfg = search_config.get("decomposition", {}) or {}
-    decomposition_enabled = bool(decomp_cfg.get("enabled", False))
-    decomp_sources = decomp_cfg.get("sources") or availables
 
     client = _build_http_client(search_config)
     resolver = QueryResolver(input_dir, search_config)
     results: Dict[str, list] = {}
 
-    for source in availables:
+    for source in all_sources:
         provider = build_provider(source, search_config, client)
         if provider is None:
             continue
 
-        try:
-            base_query, query_origin = resolver.for_source(source)
-            if not base_query:
-                writeLog("warning", logger, f"[{source.upper()}] Sin query para API; se usará modo file")
+        # Trabajos (flujo, origen, query, max_results) para esta fuente.
+        jobs: List[Tuple[str, str, str, int]] = []
+        for stream in streams:
+            if source not in (stream.get("sources") or []):
                 continue
-
+            base_query, query_origin = resolver.for_stream_source(stream, source)
+            if not base_query:
+                continue
             if source in ("scopus", "ieee") and query_origin.endswith(":query"):
                 writeLog(
                     "warning", logger,
-                    f"[{source.upper()}] Usando la query genérica; {source} tiene su "
-                    f"propia sintaxis. Define 'queries.{source}' en conceptsQuery.json.",
+                    f"[{source.upper()}] Usando la query genérica en el flujo "
+                    f"'{stream['name']}'; {source} tiene su propia sintaxis.",
                 )
-
-            # Lista de queries: global + (si procede) una por RQ.
-            queries: List[Tuple[str, str]] = [(query_origin or "query", base_query)]
-            if decomposition_enabled and source in decomp_sources:
+            jobs.append((stream["name"], query_origin or "query", base_query, stream["max_results"]))
+            if stream.get("decomposition"):
                 for label, concept_query in resolver.per_concept_queries(source):
-                    queries.append((f"concept:{label}", concept_query))
-                if len(queries) > 1:
-                    writeLog("info", logger,
-                             f"[{source.upper()}] Decomposition activa: {len(queries)} queries "
-                             f"(1 global + {len(queries) - 1} por RQ)")
+                    jobs.append((stream["name"], f"streams.{stream['name']}.concept:{label}",
+                                 concept_query, stream["max_results"]))
 
+        if not jobs:
+            writeLog("warning", logger, f"[{source.upper()}] Sin query para API; se usará modo file")
+            continue
+
+        try:
             store = SnapshotStore(raw_root, source)
             accumulated: List[Dict[str, Any]] = []
-            for qi, (origin, query) in enumerate(queries):
-                writeLog("info", logger, f"[{source.upper()}] query API ({origin}): {query[:160]}...")
+            for qi, (stream_name, origin, query, job_max) in enumerate(jobs):
+                writeLog("info", logger,
+                         f"[{source.upper()}][{stream_name}] query API ({origin}): {query[:140]}...")
                 try:
                     query_records, snapshot_name = _fetch_and_normalize(
-                        provider, store, query, refresh, max_results
+                        provider, store, query, refresh, job_max
                     )
                 except (MissingCredentials, IngestionError) as exc:
                     if qi == 0:
-                        raise  # sin la query global no hay ingesta: degradar a file
+                        raise  # sin la primera query no hay ingesta: degradar a file
                     writeLog("warning", logger,
-                             f"[{source.upper()}] Query por RQ fallida ({origin}): {exc}; se omite.")
+                             f"[{source.upper()}] Query '{origin}' fallida: {exc}; se omite.")
                     continue
                 for record in query_records:
+                    record["query_stream"] = stream_name
                     record["_snapshot_name"] = snapshot_name
                 accumulated.extend(query_records)
 
-            records = _dedup_records(accumulated)[:max_results]
+            # Dedup + tope por flujo, y después dedup cruzado (fusiona flujos).
+            by_stream: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for record in accumulated:
+                by_stream[record.get("query_stream") or "default"].append(record)
+
+            capped: List[Dict[str, Any]] = []
+            for stream in streams:
+                chunk = by_stream.get(stream["name"], [])
+                if chunk:
+                    capped.extend(_dedup_records(chunk)[:stream["max_results"]])
+
+            records = _dedup_records(capped)
             for index, record in enumerate(records, start=1):
                 snapshot_name = record.pop("_snapshot_name", "")
                 record["source_index"] = index
@@ -190,14 +214,17 @@ def run_api_ingestion(
                 record["snapshot_ref"] = f"_raw/{source}/{snapshot_name}"
 
             if records:
-                if len(queries) > 1:
-                    writeLog("info", logger,
-                             f"[{source.upper()}] Decomposition: {len(accumulated)} crudos -> "
-                             f"{len(records)} únicos")
+                stream_counts = defaultdict(int)
+                for record in records:
+                    for s in (record.get("query_streams") or [record.get("query_stream")]):
+                        if s:
+                            stream_counts[s] += 1
                 output_file = Path(output_dir) / f"{source}_search.json"
                 save_json(records, output_file)
                 results[source] = records
-                writeLog("info", logger, f"[{source.upper()}] {len(records)} papers guardados en {output_file}")
+                writeLog("info", logger,
+                         f"[{source.upper()}] {len(records)} papers guardados en {output_file} "
+                         f"({dict(stream_counts)})")
             else:
                 writeLog("warning", logger, f"[{source.upper()}] La API no devolvió registros válidos")
 

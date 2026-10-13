@@ -28,6 +28,7 @@ donde n es un entero incremental (1, 2, 3...) a través de TODOS los archivos de
 
 from sources.common.common import logger, processControl, writeLog
 from sources.common.dataManager import save_json
+from sources.common.streams import load_streams, stream_sources, stream_names_for_source
 from sources.common.utils import safe_int, normalized_title, sha1, normalize_text, normalize_doi, needs_abstract_recovery, inicioModulo
 
 import csv
@@ -801,6 +802,12 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
             all_data.extend(data)
 
     if all_data:
+        # Etiquetar la procedencia por flujo de búsqueda.
+        stream_names = stream_names_for_source(load_streams(search_config or {}), known_source)
+        if stream_names:
+            for record in all_data:
+                record.setdefault("query_streams", stream_names)
+
         # ACM/arXiv exportan abstracts truncados: recuperarlos antes de persistir.
         if known_source in ("acm", "arxiv"):
             try:
@@ -837,11 +844,14 @@ def processNormalizeSearchResults():
     input_dir, output_dir = inicioModulo("processNormalizeSearchResults")
 
     search_config = processControl.defaults.get("search", {})
-    availables = search_config.get("availables", [])
-    if not availables:
-        writeLog("warning", logger, "No search sources configured in 'availables'")
+    streams = load_streams(search_config)
+    sources = stream_sources(streams)
+    if not sources:
+        writeLog("warning", logger, "No search sources configured (streams/availables)")
         return
-    writeLog("info", logger, f"Processing sources: {availables}")
+    writeLog("info", logger,
+             f"Processing {len(sources)} sources from {len(streams)} stream(s): "
+             f"{[s['name'] for s in streams]}")
 
     results = {}
 
@@ -854,7 +864,7 @@ def processNormalizeSearchResults():
         writeLog("exception", logger, f"Falló la capa de ingesta API: {exc}")
 
     # 2) Fuentes en modo file (o fallback de las API que no resolvieron)
-    for source in availables:
+    for source in sources:
         if source in results:
             continue
 

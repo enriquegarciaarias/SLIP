@@ -1,5 +1,6 @@
 # rankingEngine.py
 from sources.common.common import logger, processControl, writeLog
+from sources.common.streams import load_streams
 from sources.common.utils import inicioModulo
 
 from sklearn.metrics.pairwise import cosine_similarity
@@ -187,6 +188,54 @@ def select_top_k(ranked_papers: list[dict], k: int = TOP_K) -> list[dict]:
     return ranked_papers[:k]
 
 
+def _stream_ranking_query(stream: dict, study_query: str) -> str:
+    """Query de embedding para rankear un flujo: ranking_query > query > estudio."""
+    return (stream.get("ranking_query") or stream.get("query") or study_query).strip()
+
+
+def _rank_by_streams(papers: list[dict], streams: list[dict], study_query: str) -> list[dict]:
+    """
+    Rankea por flujo con cuota independiente y une los resultados.
+
+    Cada flujo solo puntúa los papers etiquetados con su nombre (o todos si el
+    corpus no trae etiquetas y hay un único flujo legacy). Así un flujo "nlp"
+    con su propia query no compite contra el ancla fisiológica del flujo
+    "physio".
+    """
+    tagged = any(p.get("query_streams") for p in papers)
+
+    selected: dict[str, dict] = {}
+    order: list[str] = []
+    for stream in streams:
+        name = stream["name"]
+        if not tagged and len(streams) == 1:
+            subset = papers
+        else:
+            subset = [p for p in papers if name in (p.get("query_streams") or [])]
+        if not subset:
+            continue
+
+        query_text = _stream_ranking_query(stream, study_query)
+        if not query_text:
+            continue
+
+        ranked = rank_papers_embeddings(subset, query_text)
+        top_k = int(stream["top_k"]) if stream.get("top_k") else TOP_K
+        added = 0
+        for paper in select_top_k(ranked, k=top_k):
+            gid = paper.get("global_id") or paper.get("paper_id")
+            if gid in selected:
+                continue
+            selected[gid] = paper
+            order.append(gid)
+            added += 1
+        writeLog("info", logger,
+                 f"[RankingEngine] Flujo '{name}': {len(subset)} candidatos -> "
+                 f"{added} seleccionados (top_k={top_k})")
+
+    return [selected[gid] for gid in order]
+
+
 # --------------------------------------------------
 # ENTRY POINT
 # --------------------------------------------------
@@ -216,15 +265,20 @@ def processRankingEngine():
 
     writeLog("info", logger, f"[RankingEngine] Loaded {len(papers)} candidate papers")
 
-    query_text = build_query_from_study_description(study_desc)
-    if not query_text.strip():
+    study_query = build_query_from_study_description(study_desc)
+    if not study_query.strip():
         writeLog("error", logger,
             "[RankingEngine] Empty query built from studyDescription.json — "
             "check 'objectives', 'keywords', 'focus_terms' fields")
         return None
 
-    ranked = rank_papers_embeddings(papers, query_text)
-    top_k = select_top_k(ranked, k=TOP_K)
+    search_config = processControl.defaults.get("search", {})
+    streams = load_streams(search_config)
+    top_k = _rank_by_streams(papers, streams, study_query)
+
+    if not top_k:
+        writeLog("warning", logger, "[RankingEngine] No papers selected by any stream")
+        return []
 
     output_file = output_dir / "ranked_papers.json"
     with open(output_file, "w", encoding="utf-8") as f:
@@ -232,7 +286,7 @@ def processRankingEngine():
 
     writeLog("info", logger,
         f"[RankingEngine] Saved {len(top_k)} ranked papers to {output_file} "
-        f"(from {len(ranked)} rankable of {len(papers)} total)")
+        f"(from {len(papers)} total, {len(streams)} stream(s))")
 
     return top_k
 

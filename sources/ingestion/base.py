@@ -246,6 +246,21 @@ class QueryResolver:
 
         return "", ""
 
+    def for_stream_source(self, stream: Dict[str, Any], source: str) -> tuple[str, str]:
+        """Resuelve (query, origen) para un flujo concreto y una fuente.
+
+        Prioridad:
+          1. `streams.<name>.queries.<source>`
+          2. `streams.<name>.query`
+          3. resolución legacy (`for_source`): provider/query_source.
+        """
+        queries = stream.get("queries") or {}
+        if queries.get(source):
+            return queries[source], f"streams.{stream.get('name')}.queries.{source}"
+        if stream.get("query"):
+            return stream["query"], f"streams.{stream.get('name')}.query"
+        return self.for_source(source)
+
     def per_concept_queries(self, source: str) -> list[tuple[str, str]]:
         """Queries por pregunta de investigación (decomposition).
 

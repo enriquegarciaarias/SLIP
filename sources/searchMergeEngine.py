@@ -34,6 +34,7 @@ fuentes (autores, keywords, referencias, años, enlaces, etc.).
 """
 
 from sources.common.common import logger, processControl, writeLog
+from sources.common.streams import load_streams, stream_sources
 from sources.common.utils import normalized_title, normalize_doi, sha1, safe_int, inicioModulo
 
 from collections import Counter, defaultdict
@@ -163,6 +164,12 @@ def normalize_paper(paper: dict, source: str) -> dict:
         "subject_areas": paper.get("subject_areas", []) or [],
         "raw_source_file": paper.get("raw_source_file"),
         "snapshot_ref": paper.get("snapshot_ref"),
+        "query_streams": sorted({
+            s for s in (
+                (paper.get("query_streams") or [])
+                + ([paper["query_stream"]] if paper.get("query_stream") else [])
+            ) if s
+        }),
     }
 
 
@@ -293,6 +300,9 @@ def merge_group(items: list[dict]) -> dict:
         "raw_source_file": _first_nonempty(items, "raw_source_file"),
         "snapshot_ref": _first_nonempty(items, "snapshot_ref"),
         "merged_paper_ids": [item.get("paper_id") for item in items if item.get("paper_id")],
+        "query_streams": sorted({
+            s for item in items for s in (item.get("query_streams") or []) if s
+        }),
         "merged_from": len(items),
     }
     return merged
@@ -361,10 +371,11 @@ def processSearchMergeEngine():
     input_dir, output_dir = inicioModulo("processSearchMergeEngine")
 
     search_config = processControl.defaults.get("search", {})
-    availables = search_config.get("availables", [])
+    streams = load_streams(search_config)
+    availables = stream_sources(streams)
 
     if not availables:
-        writeLog("warning", logger, "[MERGE] No search sources configured in 'availables'")
+        writeLog("warning", logger, "[MERGE] No search sources configured (streams/availables)")
         return []
 
     writeLog("info", logger, f"[MERGE] Processing sources: {availables}")
