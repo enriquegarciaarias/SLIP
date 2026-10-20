@@ -303,6 +303,9 @@ def merge_group(items: list[dict]) -> dict:
         "query_streams": sorted({
             s for item in items for s in (item.get("query_streams") or []) if s
         }),
+        "query_strategies": sorted({
+            s for item in items for s in (item.get("query_strategies") or []) if s
+        }),
         "merged_from": len(items),
     }
     return merged
@@ -353,14 +356,42 @@ def merge_sources(sources_data: dict) -> list:
 # ==========================================================
 
 def load_source_data(source_name: str, search_dir: Path) -> list:
+    """
+    Carga _search.json de una fuente. Soporta múltiples archivos con sufijo
+    de estrategia de búsqueda (ej: scopus_search_01.json, scopus_search_02.json).
+    """
+    # Primero intentar el archivo base (sin sufijo de estrategia)
     source_file = search_dir / f"{source_name}_search.json"
-    if not source_file.exists():
-        writeLog("warning", logger, f"[MERGE] {source_name}_search.json not found in {search_dir}")
+    all_data = []
+    
+    if source_file.exists():
+        try:
+            with open(source_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            writeLog("info", logger, f"[MERGE] Loaded {len(data)} papers from {source_name}_search.json")
+            all_data.extend(data)
+        except Exception as e:
+            writeLog("warning", logger, f"[MERGE] Error loading {source_file}: {e}")
+    
+    # Luego buscar archivos con sufijo de estrategia (ej: scopus_search_01.json)
+    import glob
+    strategy_files = sorted(search_dir.glob(f"{source_name}_search_*.json"))
+    for sf in strategy_files:
+        try:
+            with open(sf, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            writeLog("info", logger,
+                     f"[MERGE] Loaded {len(data)} papers from {sf.name}")
+            all_data.extend(data)
+        except Exception as e:
+            writeLog("warning", logger, f"[MERGE] Error loading {sf}: {e}")
+    
+    if not all_data:
+        writeLog("warning", logger,
+                 f"[MERGE] No search data found for {source_name} in {search_dir}")
         return []
-    with open(source_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    writeLog("info", logger, f"[MERGE] Loaded {len(data)} papers from {source_name}")
-    return data
+    
+    return all_data
 
 
 # ==========================================================

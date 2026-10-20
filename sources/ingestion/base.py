@@ -97,6 +97,12 @@ class HttpClient:
 
                 if response.status_code == 404:
                     # No tiene sentido reintentar: el recurso no existe.
+                    full_url = url
+                    if params:
+                        from urllib.parse import urlencode
+                        full_url += "?" + urlencode(params)
+                    writeLog("debug", logger,
+                             f"[HTTP DEBUG] URL completa fallida (404): {full_url}")
                     raise IngestionError(f"HTTP 404 en {url}: recurso no encontrado")
 
                 if response.status_code in self._RETRYABLE_STATUS:
@@ -123,6 +129,12 @@ class HttpClient:
                 writeLog("warning", logger, f"[HTTP] error {exc}; reintento en {wait:.1f}s")
                 time.sleep(wait)
 
+        full_url = url
+        if params:
+            from urllib.parse import urlencode
+            full_url += "?" + urlencode(params)
+        writeLog("debug", logger,
+                 f"[HTTP DEBUG] URL completa tras agotar reintentos: {full_url}")
         raise IngestionError(f"GET falló para {url}: {last_error}")
 
 
@@ -231,35 +243,86 @@ class QueryResolver:
             writeLog("error", logger, f"[QUERY] No se pudo leer {self.path}: {exc}")
             return {}
 
-    def for_source(self, source: str) -> tuple[str, str]:
-        """Devuelve (query, origen). Origen vacío si no hay query."""
+    def _strategy_config(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+        """Devuelve la config de la estrategia dada, o {} si no hay estrategias."""
+        if not strategy_id or not isinstance(self.data, dict):
+            return {}
+        strategies = self.data.get("query_strategies")
+        if isinstance(strategies, dict):
+            return strategies.get(strategy_id, {}) or {}
+        return {}
+
+    def _first_strategy_query(self) -> tuple[str, str]:
+        """Devuelve la query genérica de la primera estrategia definida en
+        conceptsQuery.json > query_strategies.XX.query, como fallback universal."""
+        if isinstance(self.data, dict):
+            strategies = self.data.get("query_strategies")
+            if isinstance(strategies, dict) and strategies:
+                # Tomar la primera estrategia ordenada por clave
+                first_key = sorted(strategies.keys())[0]
+                first_strategy = strategies[first_key]
+                if isinstance(first_strategy, dict):
+                    q = first_strategy.get("query", "")
+                    if q:
+                        return q, f"{self.path.name}:query_strategies.{first_key}.query"
+        return "", ""
+
+    def for_source(
+        self, source: str, strategy_id: Optional[str] = None
+    ) -> tuple[str, str]:
+        """Devuelve (query, origen). Origen vacío si no hay query.
+
+        Cuando se pasa ``strategy_id``, prioriza la query de esa estrategia
+        (``query_strategies.<strategy_id>.queries.<source>`` o
+        ``query_strategies.<strategy_id>.query``) antes del fallback legacy.
+        """
         provider_cfg = self.search_config.get("providers", {}).get(source, {})
         if provider_cfg.get("query"):
             return provider_cfg["query"], f"config.search.providers.{source}.query"
 
         if isinstance(self.data, dict):
+            # 1) Query específica de la estrategia para esta fuente
+            strategy_cfg = self._strategy_config(strategy_id)
+            if strategy_cfg:
+                queries = strategy_cfg.get("queries")
+                if isinstance(queries, dict) and queries.get(source):
+                    return queries[source], (
+                        f"{self.path.name}:query_strategies.{strategy_id}.queries.{source}"
+                    )
+                q = strategy_cfg.get("query", "")
+                if q:
+                    return q, f"{self.path.name}:query_strategies.{strategy_id}.query"
+
+            # 2) Query legacy (sin estrategia)
             queries = self.data.get("queries")
             if isinstance(queries, dict) and queries.get(source):
                 return queries[source], f"{self.path.name}:queries.{source}"
             if self.data.get("query"):
                 return self.data["query"], f"{self.path.name}:query"
+            # Fallback universal: query genérica de la primera estrategia
+            q, origin = self._first_strategy_query()
+            if q:
+                return q, origin
 
         return "", ""
 
-    def for_stream_source(self, stream: Dict[str, Any], source: str) -> tuple[str, str]:
+    def for_stream_source(
+        self, stream: Dict[str, Any], source: str, strategy_id: Optional[str] = None
+    ) -> tuple[str, str]:
         """Resuelve (query, origen) para un flujo concreto y una fuente.
 
         Prioridad:
           1. `streams.<name>.queries.<source>`
           2. `streams.<name>.query`
-          3. resolución legacy (`for_source`): provider/query_source.
+          3. resolución legacy (`for_source`): provider/query_source, con
+             ``strategy_id`` para usar la query de la estrategia dada.
         """
         queries = stream.get("queries") or {}
         if queries.get(source):
             return queries[source], f"streams.{stream.get('name')}.queries.{source}"
         if stream.get("query"):
             return stream["query"], f"streams.{stream.get('name')}.query"
-        return self.for_source(source)
+        return self.for_source(source, strategy_id=strategy_id)
 
     def per_concept_queries(self, source: str) -> list[tuple[str, str]]:
         """Queries por pregunta de investigación (decomposition).

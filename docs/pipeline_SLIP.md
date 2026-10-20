@@ -17,13 +17,14 @@ módulo anterior y deja los suyos para el siguiente. La secuencia exacta está o
 
 ### Guía del proceso
 
-El flujo se configura con dos ficheros por "asunto" (subject) y uno global:
+El flujo se configura con **tres** ficheros por "asunto" (subject) y uno global:
 
 | Fichero | Ubicación | Papel |
 |---|---|---|
 | `config.json` | raíz del proyecto | Configuración global: fuentes de búsqueda disponibles, modelos LLM/embeddings, umbrales de los módulos. |
 | `studyDescription.json` | `results/input/{subject}/` | Define el estudio: objetivos, keywords, `focus_terms` y campos de extracción técnica. Guía ranking, minería y anexo técnico. |
 | `conceptsQuery.json` | `results/input/{subject}/` | Define las preguntas de investigación (conceptos) y el query de búsqueda. Guía descubrimiento, alineación y síntesis. |
+| `personalizacion.json` | `results/input/{subject}/` | Personalización por investigador: **blacklist** de `biblioID` a excluir, metadatos de auditoría y espacio `custom` para futuras extensiones. |
 
 ### Convenciones de directorios
 
@@ -322,7 +323,7 @@ partir de las evidencias enriquecidas. Utiliza caché de resúmenes narrativos (
 - **Atribución a nivel de afirmación:** el prompt numera las evidencias `[1..n]` y pide citarlas
   inline; cada hallazgo persiste el mapa `[n] → doc_id` en `concept_findings.json > findings[].citations`.
 - **Toma:** `enriched_evidences.json` + `studyDescription.json` y `conceptsQuery.json` (entrada).
-- **Deja:** `concept_findings.json`.
+- **Deja:** `concept_findings.json` (+ `narrative_summaries.json` como caché de resúmenes narrativos).
 
 ### 15. Anexo técnico
 **Módulo:** `sources/technicalAnnex.py` · `processTechnicalAnnex()`
@@ -418,6 +419,16 @@ por pregunta de investigación, con los DOI/metadatos de los papers involucrados
 
 - **Usado por:** `corpusCleaning`, `conceptEvidence` y `trainingMaterials`.
 
+#### C. Scripts auxiliares / experimentales
+Los siguientes módulos existen en `sources/` pero **no forman parte del pipeline estándar** (`mainProcess`). Se invocan manualmente o desde `customProcess()` según necesidad:
+
+- `pdfVaultReconcile.py` – concilia y repara el índice `_pdf_vault` / `pdf_inventory.json`.
+- `doiAudit.py` – auditoría y normalización masiva de DOIs en el corpus.
+- `queryExpander.py` – expansión automática de queries a partir de sinónimos / embeddings.
+- `abstractRecovery.py` – recuperación de abstracts truncados consultando APIs (PubMed, Crossref, OpenAlex).
+- `news/newsCollector.py`, `news/newsClassifier.py`, `news/newsEnricher.py`, `news/newsSynthesizer.py` – ingesta y síntesis de fuentes de noticias (RSS, GNews, etc.).
+- `complementos/ExistsOverview.py`, `complementos/existOverviewCheck.py`, `complementos/migracionInventory.py` – utilidades de migración y comprobación de inventarios legacy.
+
 ---
 
 ## 📝 4. Notas
@@ -442,3 +453,39 @@ por pregunta de investigación, con los DOI/metadatos de los papers involucrados
 - **Traducción:** backend local `Helsinki-NLP/opus-mt-en-es` (requiere `transformers` +
   `sentencepiece`/`sacremoses`) con respaldo `deep_translator` (Google); caché en
   `translation_cache.json`.
+
+### Personalización y blacklist (feedback iterativo)
+
+Para incorporar el feedback del investigador tras revisar `training_materials.md`, el pipeline lee
+`results/input/{subject}/personalizacion.json`. Estructura:
+
+```json
+{
+  "version": 1,
+  "blacklist": {
+    "ids": ["pubmed_999", "doi_10.1234/xyz"],
+    "reason": "Excluidos por falta de relevancia temática"
+  },
+  "metadata": {
+    "created": "2026-10-14",
+    "author": "investigadorX",
+    "notes": "Primera versión de personalización"
+  },
+  "custom": {}
+}
+```
+
+- **`blacklist.ids`**: array de `paper_id` (p. ej. `pubmed_999`, `doi_10.1234/xyz`) que **se excluyen**
+  antes de la adquisición de PDFs (paso 6) y **se filtran** al generar `training_materials.md` (paso 16).
+  Así no consumen cuota de descarga, no aparecen en PRISMA, ni en la bibliografía, ni en los hallazgos.
+- **`metadata`**: trazabilidad (fecha, autor, notas).
+- **`custom`**: reservado para futuras personalizaciones sin romper compatibilidad.
+- **`version`**: para migraciones de esquema.
+
+El filtro se aplica en:
+1. **Adquisición** (`adquisitionEngine`): se descartan antes de intentar descargar.
+2. **Materiales de formación** (`trainingMaterials`): se eliminan de `papers_text`, `metadata_lookup`,
+   `selected` y `missing`, recalculando los conteos PRISMA y la bibliografía en consecuencia.
+
+> Basta añadir IDs a `blacklist.ids` y volver a ejecutar el pipeline (o solo los pasos 6 y 16) para que
+> los papers desaparezcan de todo el flujo.

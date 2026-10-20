@@ -20,8 +20,8 @@ import re
 # encabezado vaya precedido por fin de frase, salto de línea o inicio.
 _REF_HEADING = re.compile(
     r"(?i)(?:[.!?]\s+|\n|^)"
-    r"(references|bibliography|works cited|literature cited|references and notes)"
-    r"\s*(?=[A-Z0-9\[\(]|et al)"
+    r"(references|bibliography|works cited|literature cited|references and notes|reference list)"
+    r"\s*(?=[A-Z0-9\[\(]|et al|\d)"
 )
 
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")

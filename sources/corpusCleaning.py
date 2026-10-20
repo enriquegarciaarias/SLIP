@@ -170,6 +170,16 @@ def processCorpusCleaning():
             for sec_name, sec_text in extraction_result.get("sections", {}).items()
         }
 
+        # --- PASO C.1: Añadir sección virtual con captions de tablas y figuras ---
+        captions = extraction_result.get("captions", [])
+        if captions:
+            captions_text = "\n".join(
+                f"{c['label']} {c['texto']}" for c in captions if c.get("texto")
+            )
+            clean_sections["figures_tables_captions"] = clean_text_corpus(captions_text)
+            writeLog("info", logger,
+                     f"[{paper_id}] {len(captions)} captions de tablas/figuras añadidos como sección")
+
         final_word_count = len(clean_full.split())
         final_char_count = len(clean_full)
 

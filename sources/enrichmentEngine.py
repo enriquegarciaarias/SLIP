@@ -138,11 +138,25 @@ def build_dual_review(review: list) -> tuple[list, list]:
 # CHECKPOINT
 # --------------------------------------------------
 
+def _ranking_fingerprint(review: list) -> str:
+    """
+    Calcula una firma del conjunto de papers en el ranking actual.
+
+    Se usa para verificar que el checkpoint solo se aplique cuando las
+    condiciones de entrada son idénticas (mismo conjunto de paper_ids,
+    mismo orden). Si el ranking cambió (nuevas estrategias, nuevas queries,
+    diferentes papers), el checkpoint es inválido y se descarta.
+    """
+    import hashlib
+    ids = sorted([str(p.get("paper_id", "")) for p in review if p.get("paper_id")])
+    return hashlib.sha256(",".join(ids).encode("utf-8")).hexdigest()[:16]
+
+
 def load_checkpoint(checkpoint_path: Path) -> dict:
     if checkpoint_path.exists():
         with open(checkpoint_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"last_index": 0, "selected": [], "rejected": [], "timestamp": None}
+    return {"last_index": 0, "selected": [], "rejected": [], "timestamp": None, "input_fingerprint": None}
 
 
 def save_checkpoint(checkpoint_path: Path, state: dict):
@@ -345,9 +359,30 @@ def interactive_selection(review: list, output_dir: Path) -> tuple[list, list]:
         N = Rechazar (no se adquirirá PDF)
         S = Guardar progreso y salir (reanudar después)
         F = Finalizar (todos los restantes se marcan como seleccionados)
+
+    El checkpoint solo se reutiliza si las condiciones de entrada son idénticas
+    (mismo conjunto de paper_ids en el ranking). Si el ranking cambió, se
+    descarta el checkpoint y se empieza desde cero.
     """
     checkpoint_path = output_dir / "selection_checkpoint.json"
     state = load_checkpoint(checkpoint_path)
+
+    # Verificar que las condiciones de entrada sean idénticas
+    current_fingerprint = _ranking_fingerprint(review)
+    stored_fingerprint = state.get("input_fingerprint")
+
+    if stored_fingerprint is None or stored_fingerprint != current_fingerprint:
+        if stored_fingerprint is None:
+            writeLog("warning", logger,
+                     "[Selection] Checkpoint sin fingerprint de entrada "
+                     "(ejecución anterior). Se descarta y se empieza desde cero.")
+        else:
+            writeLog("warning", logger,
+                     "[Selection] Las condiciones de entrada han cambiado (diferente "
+                     "conjunto de papers en el ranking). Se descarta el checkpoint "
+                     "previo y se empieza la selección desde cero.")
+        state = {"last_index": 0, "selected": [], "rejected": [], "timestamp": None,
+                 "input_fingerprint": current_fingerprint}
 
     selected = state["selected"]
     rejected = state["rejected"]

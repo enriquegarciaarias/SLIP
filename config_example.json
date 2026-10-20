@@ -170,10 +170,16 @@
       "training_materials": {
         "manuscript": 0,
         "emergente": 1
+      },
+      "url_blacklist": {
+        "_help": "Opcional. Dominios/URLs de sitios desde los que NO se pueden descargar PDFs (aplica a todas las investigaciones). Los papers cuyo landing_page/pdf_url coincida con estos dominios se excluyen ANTES del ranking para no ocupar cupo de top_k. Ejemplo: {\"urls\": [\"iopscience.iop.org\"], \"domains\": [\"springer.com\", \"elsevier.com\"]}",
+        "urls": [],
+        "domains": []
       }
     },
     "environment": {
         "realPath": "",
+        "results_root": "",
         "models": "models",
         "input": "results/input",
         "output": "results/output",

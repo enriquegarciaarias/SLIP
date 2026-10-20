@@ -7,6 +7,8 @@ No conoce nada sobre el pipeline, metadatos ni JSONs de entrada/salida.
 
 import re
 import fitz
+from typing import Dict, List
+from sources.common.referenceFilter import strip_reference_tail
 from sources.common.common import logger, writeLog
 
 
@@ -24,8 +26,17 @@ SECTION_PATTERNS = {
     "introduction": r"\bintroduction\b",
     "methodology": r"\b(methodology|methods|materials and methods|approach)\b",
     "results": r"\b(results|experiments|evaluation)\b",
-    "conclusion": r"\b(conclusion|conclusions|discussion and conclusion)\b"
+    "conclusion": r"\b(conclusion|conclusions|discussion and conclusion)\b",
+    "references": r"\b(references|bibliography|works cited|literature cited|references and notes)\b"
 }
+
+# Regex para detectar captions de tabla y figura (ej: "Table 2: ...", "Fig. 1: ...")
+# Diseñado para texto en línea continua (sin saltos de línea), como el producido por
+# _clean_pdf_text. Matchea hasta el siguiente caption o fin de texto.
+CAPTION_RE = re.compile(
+    r'(Table\s+\d+[:\.]|TABLE\s+\d+[:\.]|Fig\.\s*\d+[:\.]|FIG\.\s*\d+[:\.]|Figure\s+\d+[:\.]|FIGURE\s+\d+[:\.])\s*(.+?)(?=\s+(?:Table\s+\d+[:\.]|TABLE\s+\d+[:\.]|Fig\.\s*\d+[:\.]|FIG\.\s*\d+[:\.]|Figure\s+\d+[:\.]|FIGURE\s+\d+[:\.])\s|$)',
+    re.IGNORECASE
+)
 
 
 def _find_section_positions(text):
@@ -38,8 +49,9 @@ def _find_section_positions(text):
     return positions
 
 
-def _extract_sections(text):
-    positions = _find_section_positions(text)
+def _extract_sections(text, positions: Dict[str, int] = None):
+    if positions is None:
+        positions = _find_section_positions(text)
     if not positions:
         return {}
     ordered = sorted(positions.items(), key=lambda x: x[1])
@@ -48,6 +60,39 @@ def _extract_sections(text):
         end = ordered[i + 1][1] if i < len(ordered) - 1 else len(text)
         sections[name] = _clean_pdf_text(text[start:end])
     return sections
+
+
+def _extract_captions_from_text(text: str, positions: Dict[str, int]) -> List[Dict]:
+    """
+    Extrae captions de tabla y figura del texto completo y asigna cada uno a su
+    sección basándose en el offset del carácter dentro del texto.
+
+    Devuelve lista de dicts con: tipo, label, texto, seccion, offset.
+    """
+    ordered_sections = sorted(positions.items(), key=lambda x: x[1])
+    captions = []
+    for m in CAPTION_RE.finditer(text):
+        label = m.group(1).strip()
+        caption_text = m.group(2).strip()
+        if len(caption_text) <= 8:
+            continue
+        offset = m.start()
+        tipo = 'table' if 'table' in label.lower() else 'figure'
+        # Determinar sección por offset (la última sección cuyo inicio <= offset)
+        section = "unknown"
+        for name, start in ordered_sections:
+            if start <= offset:
+                section = name
+            else:
+                break
+        captions.append({
+            "tipo": tipo,
+            "label": label,
+            "texto": caption_text,
+            "seccion": section,
+            "offset": offset,
+        })
+    return captions
 
 
 def _extract_page_text(page) -> str:
@@ -98,11 +143,26 @@ def extract_full_text_service(pdf_path: str) -> dict:
             writeLog("warning", logger, f"PDF vacío o sin texto extraíble: {pdf_path}")
             return {}
 
+        # Remove bibliography/reference tail before sectioning
+        clean_full = strip_reference_tail(full_text)
+
+        # Posiciones de sección (calculadas una vez y reutilizadas para captions)
+        section_positions = _find_section_positions(clean_full)
+        sections = _extract_sections(clean_full, section_positions)
+
+        # Extraer captions de tabla y figura con su sección asignada
+        captions = _extract_captions_from_text(clean_full, section_positions)
+
+        if captions:
+            writeLog("info", logger,
+                     f"[FullText] {len(captions)} captions extraídos de {pdf_path}")
+
         return {
-            "full_text": full_text,
-            "sections": _extract_sections(full_text),
-            "word_count": len(full_text.split()),
-            "char_count": len(full_text)
+            "full_text": clean_full,
+            "sections": sections,
+            "captions": captions,
+            "word_count": len(clean_full.split()),
+            "char_count": len(clean_full)
         }
     except Exception as e:
         writeLog("error", logger, f"Error extrayendo PDF {pdf_path}: {e}")

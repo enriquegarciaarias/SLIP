@@ -79,6 +79,7 @@ from typing import Dict, List, Optional, Tuple, Set, Any
 
 from sources.common.common import logger, writeLog
 from sources.common.utils import inicioModulo, read_json, write_json
+from sources.common.referenceFilter import strip_reference_tail
 
 
 # ===========================================================================
@@ -570,6 +571,8 @@ class PaperSectionExtractor:
             text = next((raw_sections[c] for c in candidates if raw_sections.get(c)), "")
             if not text and key == "ideas":
                 text = paper.get("abstract", "") or paper.get("clean_text", "")[:2000]
+            # Remove any bibliography tail that may have leaked into the section
+            text = strip_reference_tail(text)
             section_texts[key] = text[: self._cfg.max_section_length] if text else ""
 
         # 2. Extraer metadatos (gap, trabajo futuro y solución) desde secciones candidatas

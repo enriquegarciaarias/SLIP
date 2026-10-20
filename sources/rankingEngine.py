@@ -1,7 +1,7 @@
 # rankingEngine.py
 from sources.common.common import logger, processControl, writeLog
 from sources.common.streams import load_streams
-from sources.common.utils import inicioModulo
+from sources.common.utils import inicioModulo, load_url_blacklist, is_url_blacklisted
 
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
@@ -145,7 +145,17 @@ def build_query_from_study_description(study_desc: dict) -> str:
 # RANKING
 # --------------------------------------------------
 
-def rank_papers_embeddings(papers: list[dict], query_text: str) -> list[dict]:
+def rank_papers_embeddings(papers: list[dict], query_text: str,
+                           similarity_threshold: float = 0.0) -> list[dict]:
+    """
+    Calcula similitud de coseno entre la query y cada paper, filtra por
+    umbral de similitud y devuelve los papers que lo SUPERAN, ordenados
+    de mayor a menor similitud.
+
+    El umbral se aplica ANTES del corte top_k, de modo que sabemos
+    exactamente cuántos papers son relevantes y cuántos se quedan fuera
+    solo por el límite de top_k.
+    """
     model = _get_model()
 
     # CHANGED: split into rankable vs excluded before embedding.
@@ -176,11 +186,17 @@ def rank_papers_embeddings(papers: list[dict], query_text: str) -> list[dict]:
 
     similarities = cosine_similarity([query_embedding], document_embeddings)[0]
 
+    # Aplicar umbral de similitud ANTES del top_k
     ranked = [
         {**paper, "relevance_score": float(score)}
         for paper, score in zip(rankable, similarities)
+        if float(score) >= similarity_threshold
     ]
     ranked.sort(key=lambda x: x["relevance_score"], reverse=True)
+
+    writeLog("info", logger,
+        f"[RankingEngine] {len(ranked)}/{len(rankable)} papers superan el "
+        f"umbral de similitud ({similarity_threshold:.3f})")
     return ranked
 
 
@@ -193,7 +209,8 @@ def _stream_ranking_query(stream: dict, study_query: str) -> str:
     return (stream.get("ranking_query") or stream.get("query") or study_query).strip()
 
 
-def _rank_by_streams(papers: list[dict], streams: list[dict], study_query: str) -> list[dict]:
+def _rank_by_streams(papers: list[dict], streams: list[dict], study_query: str,
+                     similarity_threshold: float = 0.0) -> tuple[list[dict], list[dict]]:
     """
     Rankea por flujo con cuota independiente y une los resultados.
 
@@ -201,11 +218,15 @@ def _rank_by_streams(papers: list[dict], streams: list[dict], study_query: str) 
     corpus no trae etiquetas y hay un único flujo legacy). Así un flujo "nlp"
     con su propia query no compite contra el ancla fisiológica del flujo
     "physio".
+
+    Devuelve una tupla: (papers dentro de top_k, papers que pasaron el umbral
+    pero se quedaron fuera por el límite de top_k).
     """
     tagged = any(p.get("query_streams") for p in papers)
 
     selected: dict[str, dict] = {}
     order: list[str] = []
+    outside_top_k: list[dict] = []
     for stream in streams:
         name = stream["name"]
         if not tagged and len(streams) == 1:
@@ -219,21 +240,28 @@ def _rank_by_streams(papers: list[dict], streams: list[dict], study_query: str) 
         if not query_text:
             continue
 
-        ranked = rank_papers_embeddings(subset, query_text)
+        # rank_papers_embeddings ya aplicó el umbral de similitud
+        ranked = rank_papers_embeddings(subset, query_text,
+                                        similarity_threshold=similarity_threshold)
         top_k = int(stream["top_k"]) if stream.get("top_k") else TOP_K
         added = 0
-        for paper in select_top_k(ranked, k=top_k):
+        for i, paper in enumerate(ranked):
             gid = paper.get("global_id") or paper.get("paper_id")
             if gid in selected:
                 continue
-            selected[gid] = paper
-            order.append(gid)
-            added += 1
+            if i < top_k:
+                selected[gid] = paper
+                order.append(gid)
+                added += 1
+            else:
+                # Pasó el umbral pero se quedó fuera por el límite de top_k
+                outside_top_k.append(paper)
         writeLog("info", logger,
                  f"[RankingEngine] Flujo '{name}': {len(subset)} candidatos -> "
-                 f"{added} seleccionados (top_k={top_k})")
+                 f"{added} seleccionados (top_k={top_k}), "
+                 f"{len(ranked) - added} superaron el umbral pero quedaron fuera por top_k")
 
-    return [selected[gid] for gid in order]
+    return [selected[gid] for gid in order], outside_top_k
 
 
 # --------------------------------------------------
@@ -265,6 +293,21 @@ def processRankingEngine():
 
     writeLog("info", logger, f"[RankingEngine] Loaded {len(papers)} candidate papers")
 
+    # --- URL/DOMAIN BLACKLIST FILTER (antes del ranking) ---
+    # Los papers cuyo landing_page/pdf_url coincida con un dominio blacklisteado
+    # se excluyen antes del scoring para no ocupar cupo de top_k.
+    url_blacklist = load_url_blacklist(output_dir)
+    if url_blacklist:
+        before = len(papers)
+        papers = [p for p in papers if not is_url_blacklisted(p, url_blacklist)]
+        removed = before - len(papers)
+        writeLog("info", logger,
+                 f"[RankingEngine] URL blacklist aplicada: {removed} papers excluidos "
+                 f"por dominio inaccesible (quedan {len(papers)})")
+        if removed:
+            writeLog("info", logger,
+                     f"[RankingEngine] Dominios blacklisteados: {sorted(url_blacklist)}")
+
     study_query = build_query_from_study_description(study_desc)
     if not study_query.strip():
         writeLog("error", logger,
@@ -274,19 +317,59 @@ def processRankingEngine():
 
     search_config = processControl.defaults.get("search", {})
     streams = load_streams(search_config)
-    top_k = _rank_by_streams(papers, streams, study_query)
+
+    # Umbral de similitud: se aplica ANTES del top_k.
+    # Debe venir obligatoriamente de config.json > defaults.ranking.similarity_threshold.
+    # Si no existe, se lanza warning y se usa 0.00 (sin filtro).
+    defaults = getattr(processControl, "defaults", None) or {}
+    ranking_cfg = defaults.get("ranking", {}) if isinstance(defaults, dict) else {}
+    if "similarity_threshold" not in ranking_cfg:
+        writeLog("warning", logger,
+                 "[RankingEngine] 'similarity_threshold' no está definido en "
+                 "config.json > defaults.ranking. Se usará 0.00 (sin filtro de similitud).")
+        similarity_threshold = 0.0
+    else:
+        similarity_threshold = float(ranking_cfg["similarity_threshold"])
+        writeLog("info", logger,
+                 f"[RankingEngine] Umbral de similitud: {similarity_threshold:.3f}")
+
+    top_k, outside_top_k = _rank_by_streams(papers, streams, study_query,
+                                            similarity_threshold=similarity_threshold)
 
     if not top_k:
         writeLog("warning", logger, "[RankingEngine] No papers selected by any stream")
         return []
 
+    # Guardar papers dentro de top_k
     output_file = output_dir / "ranked_papers.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(top_k, f, indent=2, ensure_ascii=False)
 
+    # Guardar papers que pasaron el umbral pero se quedaron fuera por top_k
+    outside_file = output_dir / "ranking_outside_top_k.json"
+    with open(outside_file, "w", encoding="utf-8") as f:
+        json.dump(outside_top_k, f, indent=2, ensure_ascii=False)
+
+    # Guardar estadísticas de ranking para el informe PRISMA
+    # Contar cuántos papers pasaron el umbral en total (top_k + outside)
+    total_passed_threshold = len(top_k) + len(outside_top_k)
+    stats = {
+        "total_evaluated": len(papers),
+        "passed_threshold": total_passed_threshold,
+        "outside_top_k": len(outside_top_k),
+        "top_k_final": len(top_k),
+        "similarity_threshold": similarity_threshold,
+    }
+    stats_file = output_dir / "ranking_stats.json"
+    with open(stats_file, "w", encoding="utf-8") as f:
+        json.dump(stats, f, indent=2, ensure_ascii=False)
+
     writeLog("info", logger,
         f"[RankingEngine] Saved {len(top_k)} ranked papers to {output_file} "
         f"(from {len(papers)} total, {len(streams)} stream(s))")
+    writeLog("info", logger,
+        f"[RankingEngine] {total_passed_threshold} papers superaron el umbral "
+        f"({similarity_threshold:.3f}); {len(outside_top_k)} se quedaron fuera por top_k")
 
     return top_k
 

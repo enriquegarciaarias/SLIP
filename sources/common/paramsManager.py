@@ -6,6 +6,7 @@ from sources.common.common import processControl, logger, writeLog
 from sources.common.utils import configLoader, dbTimestamp
 
 import argparse
+import json
 import os
 import sys
 import socket
@@ -111,12 +112,36 @@ def manageEnv():
     config = configLoader()
     environment = config.get_environment()
 
+    real_path = environment.get("realPath", "")
+    results_root_raw = environment.get("results_root", "")
+
+    # Resolver results_root: si está vacío -> None (comportamiento actual: results/ bajo realPath).
+    # Si es absoluto, usarlo tal cual. Si es relativo, unir con real_path.
+    results_root_abs = None
+    if results_root_raw:
+        if os.path.isabs(results_root_raw):
+            results_root_abs = results_root_raw
+        else:
+            results_root_abs = os.path.join(real_path, results_root_raw)
+
     env_data = {}
     for key, value in environment.items():
-        if "realPath" in key:
+        if key == "realPath":
             env_data[key] = value
+        elif key == "results_root":
+            env_data[key] = results_root_abs if results_root_abs else ""
+        elif key in ("input", "output"):
+            # Si hay results_root, input/output se resuelven respecto a él.
+            # Si no, comportamiento actual respecto a realPath.
+            if results_root_abs:
+                if os.path.isabs(value):
+                    env_data[key] = value
+                else:
+                    env_data[key] = os.path.join(results_root_abs, value)
+            else:
+                env_data[key] = os.path.join(real_path, value)
         else:
-            env_data[key] = os.path.join(environment["realPath"], value)
+            env_data[key] = os.path.join(real_path, value)
 
     os.makedirs(env_data['cache'], exist_ok=True)
     os.environ['PYTHONPYCACHEPREFIX'] = env_data['cache']
@@ -126,9 +151,51 @@ def manageEnv():
 
 
 def manageDefaults():
+    """
+    @Desc: Carga los defaults del pipeline. Hace merge entre el config.json global
+           y el config.json específico de la investigación (results/input/<subject>/config.json).
+           El config específico sobrescribe al global para las claves que defina.
+    @Result: Retorna el diccionario de defaults fusionado.
+    """
     config = configLoader()
     environment = config.get_defaults()
+
+    # Cargar config específico de la investigación si existe
+    subject = getattr(processControl, "args", None)
+    subject_name = subject.subject if subject and hasattr(subject, "subject") else None
+
+    if subject_name:
+        real_path = getattr(processControl, "env", {}).get("realPath", "")
+        subject_config_path = os.path.join(
+            real_path, "results", "input", subject_name, "config.json"
+        )
+        if os.path.exists(subject_config_path):
+            try:
+                with open(subject_config_path, "r", encoding="utf-8") as f:
+                    subject_config = json.load(f)
+                environment = _deep_merge(environment, subject_config)
+                writeLog("info", logger,
+                         f"[Params] Config específico cargado para investigación: {subject_name}")
+            except Exception as exc:
+                writeLog("warning", logger,
+                         f"[Params] Error cargando config específico de {subject_name}: {exc}")
+
     return environment
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """
+    Hace merge profundo de dos diccionarios. Los valores de `override` sobrescriben
+    a los de `base` para las mismas claves. Los diccionarios anidados se fusionan
+    recursivamente en lugar de reemplazarse completamente.
+    """
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 def manageDatasetVars():
     config = configLoader()

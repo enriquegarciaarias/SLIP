@@ -116,6 +116,17 @@ class EvidenceConfig:
         default_factory=lambda: dict(DEFAULT_SECTION_EVIDENCE_WEIGHTS)
     )
     default_section_weight: float = DEFAULT_SECTION_WEIGHT
+    # --- Zona argumentativa (zoning) ---
+    zone_weight_enabled: bool = True
+    zone_weights: Dict[str, float] = field(default_factory=lambda: {
+        "claim": 2.0,
+        "evidence": 1.8,
+        "method": 1.2,
+        "gap": 0.8,
+        "background": 0.3,
+        "rest": 0.0,
+    })
+    default_zone_weight: float = 1.0
     genericity_penalty: float = 0.5      # w_gen (solo orden/reordenación, no filtro)
     genericity_topk: int = 5             # nº de vecinos de otros papers a promediar
     generic_threshold: float = 0.80      # genericidad cruda ≥ umbral → consenso
@@ -130,11 +141,26 @@ class EvidenceConfig:
         module_cfg = defaults.get("conceptEvidence", {}) if isinstance(defaults, dict) else {}
         if not isinstance(module_cfg, dict):
             module_cfg = {}
+        
+        # Leer preset compartido de section_weights
+        sw_config = defaults.get("section_weights", {}) if isinstance(defaults, dict) else {}
+        presets = sw_config.get("presets", {}) if isinstance(sw_config, dict) else {}
+        preset_name = module_cfg.get("section_weights_preset", "evidence_scoring")
+        base_weights = dict(presets.get(preset_name, DEFAULT_SECTION_EVIDENCE_WEIGHTS))
+        
+        # Aplicar overrides específicos de conceptEvidence
+        overrides = module_cfg.get("section_weight_overrides", {})
+        if isinstance(overrides, dict):
+            base_weights.update(overrides)
+        
         # studyDescription.json tiene prioridad sobre config.json.
         ev_cfg = {**module_cfg, **project.get("evidence_extraction", {})}
         exp_cfg = {**module_cfg.get("query_expansion", {}), **project.get("query_expansion", {})}
-        section_weights = dict(DEFAULT_SECTION_EVIDENCE_WEIGHTS)
-        section_weights.update(ev_cfg.get("section_weights", {}) or {})
+        
+        # Merge final: preset + overrides + studyDescription overrides
+        final_section_weights = dict(base_weights)
+        final_section_weights.update(ev_cfg.get("section_weights", {}) or {})
+        
         return cls(
             embedding_model_name=ev_cfg.get("embedding_model", "BAAI/bge-base-en-v1.5"),
             window=WindowConfig(
@@ -159,8 +185,14 @@ class EvidenceConfig:
             ),
             expansion_max_terms=exp_cfg.get("max_expansion_terms", 7),
             expansion_enabled=exp_cfg.get("enabled", True),
-            section_weights=section_weights,
+            section_weights=final_section_weights,
             default_section_weight=ev_cfg.get("default_section_weight", DEFAULT_SECTION_WEIGHT),
+            zone_weight_enabled=ev_cfg.get("zone_weight_enabled", True),
+            zone_weights=dict(ev_cfg.get("zone_weights", {
+                "claim": 2.0, "evidence": 1.8, "method": 1.2,
+                "gap": 0.8, "background": 0.3, "rest": 0.0,
+            })),
+            default_zone_weight=ev_cfg.get("default_zone_weight", 1.0),
             genericity_penalty=ev_cfg.get("genericity_penalty", 0.5),
             genericity_topk=ev_cfg.get("genericity_topk", 5),
             generic_threshold=ev_cfg.get("generic_threshold", 0.75),
@@ -192,6 +224,7 @@ class Evidence:
     similarity: float
     section: str = ""
     genericity: float = 0.0
+    zone: str = ""  # Zona argumentativa del párrafo origen (claim, evidence, method, ...)
 
     def to_dict(self) -> Dict:
         return {
@@ -201,6 +234,7 @@ class Evidence:
             "similarity": round(self.similarity, 4),
             "section": self.section,
             "genericity": round(self.genericity, 4),
+            "zone": self.zone,
         }
 
 
@@ -599,6 +633,10 @@ class DocumentEvidenceExtractor:
     """
     Extrae evidencias de un único documento para un concepto dado.
     Orquesta: ventanas → filtro de ruido → score batch → Evidence objects.
+
+    Integra Argumentative Zoning: cada ventana hereda el peso de zona
+    (claim/evidence/method/...) de su párrafo origen, aplicado como
+    multiplicador sobre el score híbrido.
     """
 
     def __init__(
@@ -606,10 +644,34 @@ class DocumentEvidenceExtractor:
         registry: ModelRegistry,
         scorer: WindowScorer,
         config: EvidenceConfig,
+        zoned_lookup: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> None:
         self._registry = registry
         self._scorer = scorer
         self._cfg = config
+        self._zoned_lookup = zoned_lookup or {}
+
+    def _zone_weight_for_paragraph(
+        self, para_text: str, doc_id: str
+    ) -> Tuple[str, float]:
+        """
+        Devuelve (zone, weight) para un párrafo. Si no hay lookup de zonas
+        o el párrafo no se encuentra, devuelve ("rest", default_zone_weight).
+        """
+        if not self._cfg.zone_weight_enabled or not self._zoned_lookup:
+            return "rest", self._cfg.default_zone_weight
+
+        para_lookup = self._zoned_lookup.get(doc_id)
+        if not para_lookup:
+            return "rest", self._cfg.default_zone_weight
+
+        norm = _normalize_text(para_text)
+        zone = para_lookup.get(norm)
+        if zone is None:
+            return "rest", self._cfg.default_zone_weight
+
+        weight = self._cfg.zone_weights.get(zone, self._cfg.default_zone_weight)
+        return zone, weight
 
     def extract(
         self,
@@ -628,6 +690,9 @@ class DocumentEvidenceExtractor:
         Si no se aporta, se usa el texto alineado del documento (comportamiento
         previo). La membresía paper→concepto no se altera: aquí solo se
         "estruja" más texto del mismo paper.
+
+        Las ventanas se crean por párrafo para poder atribuir cada una a su
+        zona argumentativa y aplicar el peso correspondiente.
         """
         doc_id = document.get("doc_id", "unknown")
         paper_title = document.get("title", "")
@@ -635,34 +700,47 @@ class DocumentEvidenceExtractor:
         evidences: List[Evidence] = []
         for section_name, section_text in self._iter_sections(document, sections):
             text = strip_reference_tail(section_text)
-            sentences = TextUtils.split_sentences(text, self._registry.nlp)
-            if len(sentences) < self._cfg.window.min_sentences:
-                continue
+            # Dividir en párrafos para atribuir zona argumentativa a cada ventana
+            paragraphs = [p.strip() for p in text.split("\n\n")
+                          if p.strip() and len(p.strip()) > 30]
+            if not paragraphs:
+                paragraphs = [text.strip()] if text.strip() else []
 
-            windows = TextUtils.create_sliding_windows(sentences, self._cfg.window)
-            windows = [w for w in windows
-                       if not TextUtils.is_noise(w, self._cfg.window.min_words)]
-            if not windows:
-                continue
+            for para_text in paragraphs:
+                sentences = TextUtils.split_sentences(para_text, self._registry.nlp)
+                if len(sentences) < self._cfg.window.min_sentences:
+                    continue
 
-            scored = self._scorer.score_windows_full(
-                windows=windows,
-                query_embeddings=query_embeddings,
-                primary_query_tokens=primary_query_tokens,
-                focus_terms=focus_terms,
-            )
-            weight = self._section_weight(section_name)
-            evidences.extend(
-                Evidence(
-                    doc_id=doc_id,
-                    paper_title=paper_title,
-                    evidence_text=window_text,
-                    similarity=score * weight,
-                    section=section_name,
+                windows = TextUtils.create_sliding_windows(sentences, self._cfg.window)
+                windows = [w for w in windows
+                           if not TextUtils.is_noise(w, self._cfg.window.min_words)]
+                if not windows:
+                    continue
+
+                scored = self._scorer.score_windows_full(
+                    windows=windows,
+                    query_embeddings=query_embeddings,
+                    primary_query_tokens=primary_query_tokens,
+                    focus_terms=focus_terms,
                 )
-                for window_text, score, _emb_score in scored
-                if score >= self._cfg.scoring.min_window_similarity
-            )
+
+                # Peso combinado: sección × zona argumentativa
+                zone, zone_weight = self._zone_weight_for_paragraph(para_text, doc_id)
+                section_weight = self._section_weight(section_name)
+                combined_weight = section_weight * zone_weight
+
+                evidences.extend(
+                    Evidence(
+                        doc_id=doc_id,
+                        paper_title=paper_title,
+                        evidence_text=window_text,
+                        similarity=score * combined_weight,
+                        section=section_name,
+                        zone=zone,
+                    )
+                    for window_text, score, _emb_score in scored
+                    if score >= self._cfg.scoring.min_window_similarity
+                )
         return evidences
 
     def _iter_sections(
@@ -741,6 +819,7 @@ class ConceptProcessor:
         self._cache = query_cache
         self._registry = registry
         self._cfg = config
+        # zoned_lookup vive en el extractor (inyectado por build_pipeline)
 
     def process(
         self,
@@ -1018,10 +1097,14 @@ class ConceptEvidencePipeline:
 # Factory
 # ---------------------------------------------------------------------------
 
-def build_pipeline(config: EvidenceConfig) -> ConceptEvidencePipeline:
+def build_pipeline(
+    config: EvidenceConfig,
+    zoned_lookup: Optional[Dict[str, Dict[str, str]]] = None,
+) -> ConceptEvidencePipeline:
     """
     Ensambla el pipeline con todas sus dependencias.
     Punto único de construcción del grafo de objetos.
+    `zoned_lookup` permite activar el scoring híbrido por zona argumentativa.
     """
     registry = ModelRegistry(config.embedding_model_name)
     registry.load()
@@ -1033,7 +1116,8 @@ def build_pipeline(config: EvidenceConfig) -> ConceptEvidencePipeline:
     query_cache = QueryEmbeddingCache(registry=registry)
 
     extractor = DocumentEvidenceExtractor(
-        registry=registry, scorer=scorer, config=config
+        registry=registry, scorer=scorer, config=config,
+        zoned_lookup=zoned_lookup,
     )
     processor = ConceptProcessor(
         extractor=extractor,
@@ -1086,6 +1170,46 @@ def _load_sections_lookup(output_dir: Path) -> Dict[str, Dict[str, str]]:
     return lookup
 
 
+def _normalize_text(text: str) -> str:
+    """Normaliza texto para matching robusto de párrafos entre zoning y evidence."""
+    return " ".join(text.split()).strip()
+
+
+def _load_zoned_lookup(output_dir: Path) -> Dict[str, Dict[str, str]]:
+    """
+    Carga papers_zoned.json y construye un lookup:
+      paper_id → {normalized_paragraph_text → zone}
+    Permite recuperar la zona argumentativa de cada párrafo al extraer evidencias.
+    """
+    zoned_file = output_dir / "papers_zoned.json"
+    if not zoned_file.exists():
+        writeLog("warning", logger,
+                 f"[Evidence] {zoned_file} not found; zone weighting disabled")
+        return {}
+    try:
+        with open(zoned_file, "r", encoding="utf-8") as fh:
+            papers = json.load(fh)
+    except Exception as exc:
+        writeLog("warning", logger, f"[Evidence] Error loading papers_zoned.json: {exc}")
+        return {}
+    lookup: Dict[str, Dict[str, str]] = {}
+    for paper in papers:
+        pid = paper.get("paper_id")
+        if not pid:
+            continue
+        para_lookup: Dict[str, str] = {}
+        for para in paper.get("paragraphs", []):
+            norm = _normalize_text(para.get("text", ""))
+            if norm:
+                para_lookup[norm] = para.get("zone", "rest")
+        if para_lookup:
+            lookup[pid] = para_lookup
+    writeLog("info", logger,
+             f"[Evidence] Zoned lookup loaded: {len(lookup)} papers, "
+             f"{sum(len(v) for v in lookup.values())} paragraphs")
+    return lookup
+
+
 # ---------------------------------------------------------------------------
 # Punto de entrada
 # ---------------------------------------------------------------------------
@@ -1108,19 +1232,22 @@ def processConceptEvidence() -> Optional[Dict]:
     config = EvidenceConfig.from_file(input_dir / "studyDescription.json")
     focus_terms = _load_focus_terms(input_dir)
     sections_lookup = _load_sections_lookup(output_dir)
+    zoned_lookup = _load_zoned_lookup(output_dir) if config.zone_weight_enabled else {}
 
     writeLog("info", logger,
              f"[Evidence] Focus terms: {len(focus_terms)} | "
              f"Expansion: {'enabled' if config.expansion_enabled else 'disabled'} | "
              f"Sections lookup: {len(sections_lookup)} papers | "
+             f"Zoned lookup: {len(zoned_lookup)} papers | "
+             f"Zone weighting: {'enabled' if config.zone_weight_enabled else 'disabled'} | "
              f"genericity_penalty={config.genericity_penalty} "
              f"generic_threshold={config.generic_threshold}")
 
     # Expansión de queries via llm_client federado (lee LLM de processControl)
     aligned_concepts = _expand_queries(aligned_concepts, config)
 
-    # Construir y ejecutar pipeline
-    pipeline = build_pipeline(config)
+    # Construir y ejecutar pipeline (con zoned_lookup inyectado)
+    pipeline = build_pipeline(config, zoned_lookup=zoned_lookup)
     return pipeline.run(
         aligned_concepts=aligned_concepts,
         focus_terms=focus_terms,

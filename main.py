@@ -7,7 +7,10 @@ from sources.common.paramsManager import getConfigs
 
 
 def mainProcess():
+    fine_tuning_generated = False
     """
+"""
+
 
 
     from sources.normalizeSearchResults import processNormalizeSearchResults
@@ -37,6 +40,10 @@ def mainProcess():
     # selected_papers.json -> pdf's + pdf_download_log.json + manual_recovery_log.json + missing_pdfs.json
     processAcquisitionEngine()
 
+    # Selección completa de papers y generación del informe PRISMA (prisma.md)
+    from sources.completeSelection import processCompleteSelection
+    processCompleteSelection()
+
 
     #from sources.fullTextExtractionEngine import processFullTextExtraction
     # selected_papers.json -> papers_metadata.json  papers_text.json
@@ -46,10 +53,17 @@ def mainProcess():
     # papers_metadata.json  papers_text.json -> papers_metadata.json  papers_text.json
     processCorpusCleaning()
 
+    from sources.argumentativeZoning import processArgumentativeZoning
+    # papers_text.json -> papers_zoned.json (clasificación retórica de párrafos)
+    processArgumentativeZoning()
+
+    from sources.structureExtraction import processStructureExtraction
+    # papers_text.json -> papers_structured.json (extracción LLM de metodología, resultados, contribuciones)
+    processStructureExtraction()
 
     from sources.discoveryEngine import processDiscoveryEngine
     # papers_text.json -> candidate_concepts.json
-    # Solo identifica los papers
+    # Usa el modelo de embeddings (base o fine-tuneado específico si existe)
     processDiscoveryEngine()
 
     from sources.conceptMiningEngine import processConceptMiningEngine
@@ -60,6 +74,14 @@ def mainProcess():
     from sources.conceptAlignment import processConceptAlignment
     # concept_candidates.json + conceptsQuery.json + papers_text.json + papers_metadata.json-> aligned_concepts.json
     processConceptAlignment()
+
+    from sources.fineTuningEngine import processFineTuning
+    # Fine-tuning automático del modelo de embeddings específico por investigación.
+    # Se ejecuta tras conceptAlignment para disponer de aligned_concepts.json.
+    # Auto-detección: si ya existe modelo fine-tuneado y el corpus no cambió, se salta.
+    # Genera modelo en results/input/<subject>/models/slip-<subject>/
+    ft_result = processFineTuning()
+    fine_tuning_generated = ft_result.get("fine_tuning_generated", False) if ft_result else False
 
     from sources.conceptEvidence import processConceptEvidence
     # extrae evidencias (parrafos) de los papers seleccionados
@@ -74,7 +96,7 @@ def mainProcess():
     from sources.enrich_evidences import processEnrichEvidences
     processEnrichEvidences()
 
-    """
+
     from sources.sythesizeFindings import processSynthesizeFindings
     # enriched_evidences.json -> concept_findings.json
     processSynthesizeFindings()
@@ -82,13 +104,13 @@ def mainProcess():
     from sources.technicalAnnex import processTechnicalAnnex
     processTechnicalAnnex()
 
-    #concept_findings.json ->
     from sources.trainingMaterials import processTrainingMaterials
     processTrainingMaterials()
 
     from sources.relatedWork import processRelatedWork
     processRelatedWork()
-    return
+
+    return {"fine_tuning_generated": fine_tuning_generated}
 
 
 def customProcess():
@@ -105,9 +127,26 @@ def customProcess():
 if __name__ == '__main__':
     writeLog("info", logger, "********** STARTING Scientific Literature Intelligence Pipeline (SLIP) Process **********")
     getConfigs()
-    if processControl.args.proc == "SLIP":
-        mainProcess()
-    else:
-        customProcess()
+
+    max_restarts = 1  # Máximo 1 reinicio automático tras generar fine-tuning
+    restart_count = 0
+
+    while restart_count <= max_restarts:
+        if processControl.args.proc == "SLIP":
+            result = mainProcess()
+            fine_tuning_generated = result.get("fine_tuning_generated", False) if result else False
+
+            if fine_tuning_generated and restart_count < max_restarts:
+                restart_count += 1
+                writeLog("info", logger,
+                         f"🔄 [AUTO-RESTART] Fine-tuning generado en esta ejecución. "
+                         f"Reiniciando pipeline (paso {restart_count}/{max_restarts}) "
+                         f"para que discoveryEngine use el modelo fine-tuneado...")
+                getConfigs()  # Recargar configs para que discoveryEngine vea el modelo nuevo
+                continue
+        else:
+            customProcess()
+            break
+        break
 
     writeLog("info", logger, "********** PROCESS COMPLETED **********")

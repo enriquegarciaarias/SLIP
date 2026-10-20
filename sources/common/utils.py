@@ -258,3 +258,133 @@ def write_json(
 
     except OSError as e:
         raise OSError(f"Could not write JSON file: {path}") from e
+
+
+def _base_input_dir() -> Path:
+    """
+    Retorna el directorio base de entrada (input) respetando results_root si está
+    definido en config.json global. Si no, usa el valor de env["input"] o el
+    por defecto "results/input".
+    """
+    results_root = processControl.env.get("results_root") or "results"
+    default_input = os.path.join(results_root, "input")
+    return Path(processControl.env.get("input", default_input))
+
+
+def load_blacklist(output_dir: Path) -> set:
+    """
+    Carga la blacklist de IDs bibliográficos desde results/input/<subject>/personalizacion.json.
+    Retorna un set de strings (biblioID) a excluir.
+    """
+    try:
+        subject = output_dir.name
+        base_input = _base_input_dir()
+        personalizacion_path = base_input / subject / "personalizacion.json"
+        if not personalizacion_path.exists():
+            return set()
+        with personalizacion_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        ids = data.get("blacklist", {}).get("ids", [])
+        return set(ids)
+    except Exception as e:
+        writeLog("warning", logger, f"No se pudo cargar blacklist: {e}")
+        return set()
+
+
+def _normalize_domain(entry: str) -> str:
+    """Normaliza un dominio/URL: minúsculas, sin esquema, sin path, sin puerto."""
+    entry = (entry or "").strip().lower()
+    if not entry:
+        return ""
+    if "://" in entry:
+        entry = entry.split("://", 1)[1]
+    entry = entry.split("/", 1)[0]
+    entry = entry.split(":", 1)[0]
+    return entry
+
+
+def _collect_url_blacklist_entries(source: dict) -> set:
+    """Extrae y normaliza dominios de una sección blacklist (urls + domains)."""
+    urls = source.get("urls", []) or []
+    domains = source.get("domains", []) or []
+    normalized = set()
+    for entry in urls + domains:
+        d = _normalize_domain(entry)
+        if d:
+            normalized.add(d)
+    return normalized
+
+
+def load_url_blacklist(output_dir: Path) -> set:
+    """
+    Carga la blacklist de dominios/URLs.
+
+    Primario: sección ``url_blacklist`` de config.json global
+    (processControl.defaults). Estos dominios aplican a todas las investigaciones.
+    Secundario (override por subject): ``blacklist.urls`` / ``blacklist.domains``
+    en results/input/<subject>/personalizacion.json.
+
+    Los papers cuyo landing_page o pdf_url contenga alguno de estos dominios se
+    excluyen antes del ranking, para no ocupar cupo de top_k.
+
+    Estructura en config.json global:
+    {
+        "url_blacklist": {
+            "urls": ["iopscience.iop.org", "springer.com"],
+            "domains": ["elsevier.com"]
+        }
+    }
+
+    Estructura en personalizacion.json (opcional, por subject):
+    {
+        "blacklist": {
+            "ids": ["wos_42"],
+            "urls": ["iopscience.iop.org"],
+            "domains": ["springer.com"]
+        }
+    }
+
+    Retorna un set de strings (dominios) en minúsculas.
+    """
+    normalized: set = set()
+
+    # 1) Primario: config.json global (aplica a todas las investigaciones)
+    try:
+        defaults = getattr(processControl, "defaults", None) or {}
+        if isinstance(defaults, dict):
+            url_bl = defaults.get("url_blacklist", {}) or {}
+            normalized |= _collect_url_blacklist_entries(url_bl)
+    except Exception as e:  # noqa: BLE001
+        writeLog("warning", logger, f"No se pudo cargar url blacklist global: {e}")
+
+    # 2) Secundario: personalizacion.json por subject (override/adicional)
+    try:
+        subject = output_dir.name
+        base_input = _base_input_dir()
+        personalizacion_path = base_input / subject / "personalizacion.json"
+        if personalizacion_path.exists():
+            with personalizacion_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            blacklist = data.get("blacklist", {}) or {}
+            normalized |= _collect_url_blacklist_entries(blacklist)
+    except Exception as e:  # noqa: BLE001
+        writeLog("warning", logger, f"No se pudo cargar url blacklist por subject: {e}")
+
+    return normalized
+
+
+def is_url_blacklisted(paper: dict, url_blacklist: set) -> bool:
+    """
+    Devuelve True si el paper tiene landing_page o pdf_url que coincida
+    con algún dominio de la url_blacklist (comparación por substring en minúsculas).
+    """
+    if not url_blacklist:
+        return False
+    for field in ("landing_page", "pdf_url", "source_url", "url"):
+        value = (paper.get(field) or "").lower()
+        if not value:
+            continue
+        for domain in url_blacklist:
+            if domain in value:
+                return True
+    return False

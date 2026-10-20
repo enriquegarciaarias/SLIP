@@ -34,6 +34,7 @@ from sources.ingestion.base import (
     SnapshotStore,
 )
 from sources.common.streams import load_streams, stream_sources
+from sources.ingestion.arxiv_provider import ArxivProvider
 from sources.ingestion.ieee_provider import IeeeProvider
 from sources.ingestion.openalex_provider import OpenAlexProvider
 from sources.ingestion.pubmed_provider import PubmedProvider
@@ -44,6 +45,7 @@ PROVIDER_CLASSES = {
     "scopus": ScopusProvider,
     "ieee": IeeeProvider,
     "openalex": OpenAlexProvider,
+    "arxiv": ArxivProvider,
 }
 
 
@@ -123,11 +125,16 @@ def run_api_ingestion(
     search_config: Dict[str, Any],
     input_dir: Path,
     output_dir: Path,
+    strategy_id: Optional[str] = None,
 ) -> Dict[str, list]:
     """Ejecuta la ingesta para todas las fuentes en modo 'api'.
 
     Devuelve un dict {source: records} solo para las fuentes que se han
     resuelto por API; el llamador usa modo file para el resto.
+
+    Cuando se pasa ``strategy_id``, se usa la query de esa estrategia
+    (conceptsQuery.json > query_strategies.<strategy_id>) y el archivo de
+    salida lleva el sufijo de estrategia (ej: arxiv_search_01.json).
     """
     streams = load_streams(search_config)
     all_sources = stream_sources(streams)
@@ -154,7 +161,9 @@ def run_api_ingestion(
         for stream in streams:
             if source not in (stream.get("sources") or []):
                 continue
-            base_query, query_origin = resolver.for_stream_source(stream, source)
+            base_query, query_origin = resolver.for_stream_source(
+                stream, source, strategy_id=strategy_id
+            )
             if not base_query:
                 continue
             if source in ("scopus", "ieee") and query_origin.endswith(":query"):
@@ -212,6 +221,11 @@ def run_api_ingestion(
                 record["paper_id"] = f"{source}_{index}"
                 record["raw_source_file"] = snapshot_name
                 record["snapshot_ref"] = f"_raw/{source}/{snapshot_name}"
+                # Etiquetar con la estrategia para trazabilidad en PRISMA
+                if strategy_id:
+                    record.setdefault("query_strategies", [])
+                    if strategy_id not in record["query_strategies"]:
+                        record["query_strategies"].append(strategy_id)
 
             if records:
                 stream_counts = defaultdict(int)
@@ -219,9 +233,10 @@ def run_api_ingestion(
                     for s in (record.get("query_streams") or [record.get("query_stream")]):
                         if s:
                             stream_counts[s] += 1
-                output_file = Path(output_dir) / f"{source}_search.json"
+                strategy_suffix = f"_{strategy_id}" if strategy_id else ""
+                output_file = Path(output_dir) / f"{source}_search{strategy_suffix}.json"
                 save_json(records, output_file)
-                results[source] = records
+                results[f"{source}_{strategy_id}"] = records if strategy_id else results.setdefault(source, records)
                 writeLog("info", logger,
                          f"[{source.upper()}] {len(records)} papers guardados en {output_file} "
                          f"({dict(stream_counts)})")

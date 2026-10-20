@@ -2,7 +2,7 @@
 from sources.common.common import logger, processControl, writeLog
 from sources.common.pdf_resolver import resolve_and_download
 from sources.common.pdfIndex import register_pdf, write_pdf_log
-from sources.common.utils import inicioModulo
+from sources.common.utils import inicioModulo, load_blacklist, load_url_blacklist, is_url_blacklisted
 
 import json
 import re
@@ -143,8 +143,22 @@ def manual_pdf_intervention(paper, pdf_dir, idx, total):
                 print(f"\n   ❌ Error: {e}")
 
     print("\n⏰ Tiempo de espera automática finalizado.")
+    # Detectar entorno no interactivo (background/nohup): responder N automáticamente
+    try:
+        import sys as _sys
+        if not _sys.stdin.isatty():
+            writeLog("warning", logger,
+                     f"[Adquisition] Entorno no interactivo detectado. Omitiendo PDF manual para {paper_id}.")
+            return False, None
+    except Exception:
+        pass
     while True:
-        response = input("\n¿Opción? (Y/N/F): ").strip().lower()
+        try:
+            response = input("\n¿Opción? (Y/N/F): ").strip().lower()
+        except (EOFError, OSError):
+            writeLog("warning", logger,
+                     f"[Adquisition] No hay stdin disponible. Omitiendo PDF manual para {paper_id}.")
+            return False, None
         if response == 'f':
             return "finish", None
         elif response == 'n':
@@ -340,6 +354,27 @@ def processAcquisitionEngine():
 
     with open(selected_file, "r", encoding="utf-8") as f:
         selected_papers = json.load(f)
+
+    # --- BLACKLIST FILTER (IDs) ---
+    blacklist = load_blacklist(output_dir)
+    if blacklist:
+        before = len(selected_papers)
+        selected_papers = [p for p in selected_papers if p.get("paper_id") not in blacklist]
+        removed = before - len(selected_papers)
+        writeLog("info", logger, f"🚫 Blacklist aplicada: {removed} papers excluidos (total ahora {len(selected_papers)})")
+
+    # --- URL/DOMAIN BLACKLIST FILTER (defensa en profundidad) ---
+    url_blacklist = load_url_blacklist(output_dir)
+    if url_blacklist:
+        before = len(selected_papers)
+        selected_papers = [p for p in selected_papers if not is_url_blacklisted(p, url_blacklist)]
+        removed = before - len(selected_papers)
+        if removed:
+            writeLog("info", logger,
+                     f"🚫 URL blacklist aplicada: {removed} papers excluidos por dominio inaccesible "
+                     f"(total ahora {len(selected_papers)})")
+            writeLog("info", logger,
+                     f"🚫 Dominios blacklisteados: {sorted(url_blacklist)}")
 
     writeLog("info", logger, f"Total de papers en entrada: {len(selected_papers)}")
 

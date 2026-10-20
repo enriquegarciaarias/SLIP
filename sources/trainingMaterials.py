@@ -38,11 +38,11 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from tqdm import tqdm
 
-from sources.common.common import logger, writeLog
+from sources.common.common import logger, processControl, writeLog
 from sources.common.llm_client import LLMClient, create_ollama_client
 from sources.common.referenceFilter import looks_like_reference
 from sources.common.translationService import TranslationService
-from sources.common.utils import inicioModulo
+from sources.common.utils import inicioModulo, load_blacklist
 from sources.manuscriptEvidence import (
     ManuscriptEvidence,
     ManuscriptEvidenceBuilder,
@@ -78,6 +78,7 @@ class TrainingConfig:
     emerging_enabled: bool = True
     manuscript_enabled: bool = False
     manuscript_extension_max_tokens: int = 300
+    max_emerging_topics: int = 20  # Límite de tópicos emergentes a generar (0 = todos)
 
     @classmethod
     def from_project_config(cls, project: Dict) -> "TrainingConfig":
@@ -95,6 +96,7 @@ class TrainingConfig:
                 "translation_model", "Helsinki-NLP/opus-mt-en-es"
             ),
             filter_reference_fragments=t.get("filter_reference_fragments", True),
+            max_emerging_topics=t.get("max_emerging_topics", 20),
         )
 
     @classmethod
@@ -168,6 +170,7 @@ class SearchStrategyStats:
 class PrismaStats:
     """Números del flujo PRISMA derivados directamente del pipeline."""
     db_counts: Dict[str, int]
+    strategy_counts: Dict[str, int]   # NUEVO: conteos por estrategia de búsqueda
     total_identified: int
     duplicates_removed: int
     after_dedup: int
@@ -559,6 +562,13 @@ class DocumentDataBuilder:
             c for c in candidate_concepts.get("concepts", [])
             if str(c.get("concept_id")) in id_set
         ]
+        # Aplicar límite de tópicos emergentes (0 = sin límite)
+        max_topics = self._cfg.max_emerging_topics
+        if max_topics and max_topics > 0:
+            emergent_concepts = emergent_concepts[:max_topics]
+            writeLog("info", logger,
+                     f"[Builder] Tópicos emergentes limitados a {max_topics} "
+                     f"(de {len(id_set)} disponibles)")
         topics = []
         for concept in tqdm(emergent_concepts, desc="Generando tópicos emergentes"):
             topics.append(self._analyzer.analyze(concept, papers_text))
@@ -640,6 +650,7 @@ class DocumentDataBuilder:
 
         return PrismaStats(
             db_counts=dict(db_counts),
+            strategy_counts=prisma_raw.get("strategy_counts", {}),
             total_identified=total_identified,
             duplicates_removed=duplicates_removed,
             after_dedup=after_dedup,
@@ -776,10 +787,19 @@ class MarkdownRenderer:
 
     def _render_prisma(self, stats: PrismaStats) -> str:
         db = ", ".join(f"{k}: {v}" for k, v in stats.db_counts.items())
+        # Estrategias de búsqueda
+        strategy_lines = ""
+        if stats.strategy_counts:
+            strategy_lines = "\n### Por estrategia de búsqueda\n"
+            for sid in sorted(stats.strategy_counts.keys()):
+                strategy_lines += f"- **Estrategia {sid}:** {stats.strategy_counts[sid]} registros\n"
+            strategy_lines += "\n"
+        
         return (
             "## Flujo PRISMA (derivado del pipeline)\n\n"
             "### Identificación\n"
             f"- **Registros identificados en bases de datos:** {stats.total_identified} ({db})\n"
+            f"{strategy_lines}"
             f"- **Duplicados eliminados:** {stats.duplicates_removed}\n"
             f"- **Registros tras eliminación de duplicados:** {stats.after_dedup}\n\n"
             "### Cribado y elegibilidad\n"
@@ -1172,60 +1192,59 @@ class MarkdownRenderer:
         if not concepts:
             return header + "No se encontraron datos técnicos.\n"
 
-        # Columnas derivadas dinámicamente de los campos configurados en
-        # studyDescription.json (proyectados en cada perfil). Así el anexo es
-        # genérico y no depende del dominio (antes: columnas fijas de sensores).
-        columns = self._tech_columns(concepts)
-        if not columns:
-            return header + "No se encontraron datos técnicos.\n"
-
-        table_header = "| ID | " + " | ".join(
-            self._tech_label(c) for c in columns
-        ) + " |"
-        table_sep = "| :--- |" + " :--- |" * len(columns)
-
         lines = [header]
+        rendered_any = False
         for concept in concepts:
             papers = concept.get("papers", [])
             if not papers:
                 continue
+            rendered_any = True
             lines.append(
                 f"### Concepto {concept.get('concept_id')}: "
                 f"{concept.get('concept_name', '')}\n"
             )
-            lines.append(table_header)
-            lines.append(table_sep)
             for paper in papers[:10]:
-                lines.append(self._render_tech_row(paper, columns))
-            lines.append("")
+                lines.append(self._render_tech_paragraph(paper))
+                lines.append("")
+        if not rendered_any:
+            return header + "No se encontraron datos técnicos.\n"
         return "\n".join(lines)
 
     @staticmethod
-    def _tech_columns(concepts: Tuple[Dict, ...]) -> Tuple[str, ...]:
-        """Columnas = unión ordenada de las claves de perfil presentes."""
-        columns: List[str] = []
-        for concept in concepts:
-            for paper in concept.get("papers", []):
-                for key in (paper.get("profile") or {}).keys():
-                    if key not in columns:
-                        columns.append(key)
-        return tuple(columns)
+    def _render_tech_paragraph(paper: Dict) -> str:
+        """
+        Renderiza la ficha técnica de un paper como un párrafo legible
+        (sin tabla): "Paper `id`: Campo: valor. Campo: valor. ..."
+        """
+        profile = paper.get("profile") or {}
+        paper_id = paper.get("paper_id", "?")
 
-    @staticmethod
-    def _tech_label(field: str) -> str:
-        return field.replace("_", " ").strip().capitalize()
+        if not profile:
+            return f"**Paper `{paper_id}`**: sin datos de perfil técnico.\n"
 
-    @staticmethod
-    def _render_tech_row(paper: Dict, columns: Tuple[str, ...]) -> str:
-        profile = paper.get("profile", {})
+        fields: List[str] = []
+        for key, val in profile.items():
+            if val in (None, "", [], {}):
+                continue
+            label = key.replace("_", " ").strip().capitalize()
+            if isinstance(val, dict):
+                val_str = "; ".join(
+                    f"{k}: {v}"
+                    for k, v in val.items()
+                    if v not in (None, "", [], {})
+                ) or "—"
+            elif isinstance(val, (list, tuple, set)):
+                val_str = ", ".join(
+                    str(v) for v in val if v not in (None, "", [], {})
+                ) or "—"
+            else:
+                val_str = str(val)
+            val_str = val_str.replace("|", "\\|").replace("\n", " ").strip()
+            fields.append(f"{label}: {val_str}")
 
-        def fmt(val) -> str:
-            if isinstance(val, list):
-                return (", ".join(str(v) for v in val) or "—").replace("|", "\\|")
-            return (str(val) if val not in (None, "") else "—").replace("|", "\\|")
-
-        cells = " | ".join(fmt(profile.get(c)) for c in columns)
-        return f"| `{paper.get('paper_id', '?')}` | {cells} |"
+        if not fields:
+            return f"**Paper `{paper_id}`**: sin datos de perfil técnico.\n"
+        return f"**Paper `{paper_id}`**: " + ". ".join(fields) + ".\n"
 
     # ------------------------------------------------------------------
     # BIBLIOGRAFÍA ENRIQUECIDA CON BIBTEX, DOI Y CITATION COUNT
@@ -1452,13 +1471,45 @@ def processTrainingMaterials() -> Optional[str]:
                       ("IEEE", "ieee_search.json"), ("PubMed", "pubmed_search.json"),
                       ("ACM", "acm_search.json"), ("arXiv", "arxiv_search.json")):
         search_counts[db] = len(_load_optional(output_dir / fname, []))
+    
+    # --- CONTEOS POR ESTRATEGIA DE BÚSQUEDA ---
+    # Contar papers únicos por estrategia de búsqueda desde canonical.json
+    # Un paper puede aparecer en múltiples estrategias (se cuenta en cada una)
+    strategy_counts = {}
+    canonical_for_counts = _load_optional(output_dir / "canonical.json", [])
+    if canonical_for_counts:
+        for paper in canonical_for_counts:
+            strategies = paper.get("query_strategies", [])
+            for s in strategies:
+                strategy_counts[s] = strategy_counts.get(s, 0) + 1
+    
     canonical = _load_optional(output_dir / "canonical.json", [])
     selected = _load_optional(output_dir / "selected_acquired.json",
                               _load_optional(output_dir / "selected_papers.json", []))
     missing = _load_optional(output_dir / "missing_pdfs.json", [])
 
+    # --- BLACKLIST FILTER ---
+    blacklist = load_blacklist(output_dir)
+    if blacklist:
+        # Filtrar papers_text
+        before_pt = len(papers_text)
+        papers_text = {pid: p for pid, p in papers_text.items() if pid not in blacklist}
+        writeLog("info", logger, f"🚫 Blacklist papers_text: {before_pt - len(papers_text)} eliminados")
+        # Filtrar metadata_lookup
+        before_ml = len(metadata_lookup)
+        metadata_lookup = {pid: m for pid, m in metadata_lookup.items() if pid not in blacklist}
+        writeLog("info", logger, f"🚫 Blacklist metadata_lookup: {before_ml - len(metadata_lookup)} eliminados")
+        # Filtrar selected y missing para PRISMA
+        before_sel = len(selected)
+        selected = [p for p in selected if p.get("paper_id") not in blacklist]
+        writeLog("info", logger, f"🚫 Blacklist selected: {before_sel - len(selected)} eliminados")
+        before_mis = len(missing)
+        missing = [m for m in missing if m.get("paper_id") not in blacklist]
+        writeLog("info", logger, f"🚫 Blacklist missing: {before_mis - len(missing)} eliminados")
+
     prisma_raw = {
         "db_counts": search_counts,
+        "strategy_counts": strategy_counts,
         "n_duplicates": max(0, sum(search_counts.values()) - len(canonical)),
         "n_sought": len(selected),
         "n_not_retrieved": len(missing),
@@ -1473,6 +1524,15 @@ def processTrainingMaterials() -> Optional[str]:
     writeLog("info", logger,
              f"[TrainingMaterials] Flags: manuscript={int(config.manuscript_enabled)}, "
              f"emergente={int(config.emerging_enabled)}")
+
+    # Leer max_emerging_topics de config.json (merge global + investigación)
+    defaults = getattr(processControl, "defaults", None) or {}
+    tm_defaults = defaults.get("training_materials", {}) if isinstance(defaults, dict) else {}
+    if isinstance(tm_defaults, dict) and "max_emerging_topics" in tm_defaults:
+        config.max_emerging_topics = int(tm_defaults["max_emerging_topics"])
+        writeLog("info", logger,
+                 f"[TrainingMaterials] max_emerging_topics={config.max_emerging_topics} "
+                 f"(desde config.json)")
 
     # --- CLIENTE LLM (compartido por tópicos emergentes y manuscrito) ---
     llm_client = create_ollama_client(

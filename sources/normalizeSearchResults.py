@@ -30,6 +30,7 @@ from sources.common.common import logger, processControl, writeLog
 from sources.common.dataManager import save_json
 from sources.common.streams import load_streams, stream_sources, stream_names_for_source
 from sources.common.utils import safe_int, normalized_title, sha1, normalize_text, normalize_doi, needs_abstract_recovery, inicioModulo
+from sources.abstractRecovery import MIN_ABSTRACT_LEN
 
 import csv
 import glob
@@ -654,7 +655,8 @@ def parse_acm_file(filepath, source_name="acm", start_index=1):
                 "doi": doi,
                 "title": title,
                 "abstract": abstract,
-                "abstract_truncated": needs_abstract_recovery(abstract),
+                "abstract_truncated": needs_abstract_recovery(abstract)
+                or len(abstract.strip()) < MIN_ABSTRACT_LEN,
                 "authors": [],
                 "keywords": [],
                 "year": None,
@@ -723,7 +725,8 @@ def parse_arxiv_file(filepath, source_name="arxiv", start_index=1):
                 "doi": "",
                 "title": title,
                 "abstract": abstract,
-                "abstract_truncated": needs_abstract_recovery(abstract),
+                "abstract_truncated": needs_abstract_recovery(abstract)
+                or len(abstract.strip()) < MIN_ABSTRACT_LEN,
                 "arxiv_id": arxiv_id if arxiv_id else None,
                 "authors": [],
                 "keywords": [],
@@ -749,6 +752,92 @@ def parse_arxiv_file(filepath, source_name="arxiv", start_index=1):
     return papers
 
 
+
+# ==========================================================
+# Google Scholar parser (con start_index) - NUEVO
+# ==========================================================
+
+def parse_scholar_file(filepath, source_name="scholar", start_index=1):
+    """
+    Parsea export de Google Scholar en CSV con separador ',':
+        "Title","Authors","Venue","Year","Publisher","DocType","Snippet","CitedBy","RelatedCount","VersionsCount"
+
+    Google Scholar no expone DOI ni URL directa de landing page en el export,
+    por lo que `original_id` se deriva del título (sha1) y `landing_page` queda
+    como None. El campo `Snippet` se usa como abstract y `CitedBy` como
+    citation_count.
+    """
+    papers = []
+    idx = start_index
+
+    with open(filepath, "r", encoding="utf-8-sig", errors="ignore") as csvfile:
+        reader = csv.DictReader(csvfile)
+
+        for raw_row in reader:
+            if not raw_row:
+                continue
+            row = {}
+            for k, v in raw_row.items():
+                key = str(k).strip() if k is not None else ""
+                val = str(v).strip() if v is not None else ""
+                row[key] = val
+
+            title = normalized_title(row.get("Title", ""))
+            abstract = normalize_text(row.get("Snippet", ""))
+            venue = normalize_text(row.get("Venue", ""))
+            authors_raw = row.get("Authors", "")
+            authors = [a.strip() for a in authors_raw.split(",") if a.strip()]
+
+            try:
+                year = int(row.get("Year", "")) if row.get("Year") else None
+            except (ValueError, TypeError):
+                year = None
+
+            citation_count = safe_int(row.get("CitedBy", ""))
+            document_type = row.get("DocType", "") or ""
+            publisher = row.get("Publisher", "") or ""
+
+            if not title or len(title) < 5:
+                idx += 1
+                continue
+
+            paper = {
+                "paper_id": build_source_paper_id(source_name, idx),
+                "source": source_name,
+                "source_index": idx,
+                "original_id": f"title:{sha1(normalized_title(title))}",
+                "doi": "",
+                "title": title,
+                "abstract": abstract,
+                "abstract_truncated": needs_abstract_recovery(abstract)
+                or len(abstract.strip()) < MIN_ABSTRACT_LEN,
+                "authors": authors,
+                "keywords": [],
+                "year": year,
+                "venue": venue,
+                "document_type": document_type,
+                "language": "English",
+                "references_count": None,
+                "citation_count": citation_count,
+                "relevance_score": None,
+                "selected": False,
+                "has_full_text": False,
+                "raw_source_file": os.path.basename(filepath),
+                "pdf_url": None,
+                "landing_page": None,
+                "publisher": publisher if publisher else None,
+                "related_count": safe_int(row.get("RelatedCount", "")),
+                "versions_count": safe_int(row.get("VersionsCount", "")),
+            }
+
+            papers.append(paper)
+            idx += 1
+
+    writeLog("info", logger,
+             f"[Scholar] Parsed {len(papers)} record(s) from {os.path.basename(filepath)}")
+    return papers
+
+
 # ==========================================================
 # Parser genérico (para futuras fuentes)
 # ==========================================================
@@ -763,16 +852,24 @@ def parse_generic_file(filepath, source_name, parser_type="csv"):
 # ==========================================================
 
 def process_source(known_source: str, file_pattern: str, input_dir: Path, output_dir: Path,
-                   search_config: dict = None):
+                   search_config: dict = None, query_strategy_id: str = None):
     """
     Procesa una fuente de datos según su tipo.
     AHORA SOPORTA MÚLTIPLES ARCHIVOS que coincidan con file_pattern.
     Los IDs se asignan de forma incremental a través de todos los archivos.
+    query_strategy_id: identificador de la estrategia de búsqueda (ej: "01", "02").
     """
+    # Si se especifica query_strategy_id, buscar archivos con sufijo:
+    # ej: scopus_export_01.csv, scopus_export_02.csv
+    if query_strategy_id:
+        file_pattern = file_pattern.replace(".csv", f"_{query_strategy_id}.csv").replace(
+            ".txt", f"_{query_strategy_id}.txt").replace(".json", f"_{query_strategy_id}.json")
+
     source_files = sorted(glob.glob(str(input_dir / file_pattern)))
 
     if not source_files:
-        writeLog("warning", logger, f"[{known_source.upper()}] No files found matching: {file_pattern}")
+        writeLog("warning", logger,
+                 f"[{known_source.upper()}] No files found matching: {file_pattern}")
         return None
 
     all_data = []
@@ -793,6 +890,8 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
             data = parse_acm_file(filepath, known_source, start_index=global_index)
         elif known_source == "arxiv":
             data = parse_arxiv_file(filepath, known_source, start_index=global_index)
+        elif known_source == "scholar":
+            data = parse_scholar_file(filepath, known_source, start_index=global_index)
         else:
             data = parse_generic_file(filepath, known_source)
 
@@ -802,14 +901,22 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
             all_data.extend(data)
 
     if all_data:
-        # Etiquetar la procedencia por flujo de búsqueda.
+        # Etiquetar la procedencia por flujo de búsqueda y estrategia de query.
         stream_names = stream_names_for_source(load_streams(search_config or {}), known_source)
         if stream_names:
             for record in all_data:
                 record.setdefault("query_streams", stream_names)
 
-        # ACM/arXiv exportan abstracts truncados: recuperarlos antes de persistir.
-        if known_source in ("acm", "arxiv"):
+        # Etiquetar la estrategia de búsqueda para trazabilidad en PRISMA.
+        if query_strategy_id:
+            for record in all_data:
+                record.setdefault("query_strategies", [])
+                if query_strategy_id not in record["query_strategies"]:
+                    record["query_strategies"].append(query_strategy_id)
+
+        # Cualquier fuente con abstract ausente o truncado: intentar recuperación.
+        # No hardcodeado por fuente: si se añade una nueva fuente, se recupera igual.
+        if all_data and any(needs_abstract_recovery(r.get("abstract")) for r in all_data):
             try:
                 from sources.abstractRecovery import recover_abstracts
                 recover_abstracts(all_data, known_source, search_config or {})
@@ -817,9 +924,12 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
                 writeLog("exception", logger,
                          f"[{known_source.upper()}] Falló la recuperación de abstracts: {exc}")
 
-        output_file = output_dir / f"{known_source}_search.json"
+        # Nombre de archivo de salida con sufijo de estrategia si aplica
+        strategy_suffix = f"_{query_strategy_id}" if query_strategy_id else ""
+        output_file = output_dir / f"{known_source}_search{strategy_suffix}.json"
         save_json(all_data, output_file)
-        writeLog("info", logger, f"[{known_source.upper()}] {len(all_data)} papers saved to {output_file}")
+        writeLog("info", logger,
+                 f"[{known_source.upper()}] {len(all_data)} papers saved to {output_file}")
         return all_data
 
     return None
@@ -829,17 +939,78 @@ def process_source(known_source: str, file_pattern: str, input_dir: Path, output
 # Main
 # ==========================================================
 
+def _load_query_strategies(input_dir: Path) -> dict:
+    """
+    Carga las estrategias de búsqueda desde conceptsQuery.json.
+    
+    Estructura esperada en conceptsQuery.json:
+    {
+      "query_strategies": {
+        "01": {
+          "query": "...",
+          "queries": {
+            "scopus": "...",
+            "wos": "...",
+            ...
+          }
+        },
+        "02": { ... }
+      },
+      "concepts": [...]
+    }
+    
+    Retorna un dict {strategy_id: strategy_config} o {} si no hay estrategias definidas.
+    """
+    query_file = input_dir / "conceptsQuery.json"
+    if not query_file.exists():
+        return {}
+    try:
+        with open(query_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        strategies = data.get("query_strategies", {})
+        if isinstance(strategies, dict):
+            return strategies
+    except Exception as exc:
+        writeLog("warning", logger,
+                 f"[NormalizeSearch] Error loading query strategies: {exc}")
+    return {}
+
+
+def _clean_previous_search_outputs(output_dir: Path) -> None:
+    """Elimina archivos *_search.json previos en output_dir para evitar
+    mezclar registros de ejecucións anteriores con la actual.
+
+    Criterio SOA: cada ejecución del pipeline parte de un directorio de
+    salida limpio. Los archivos legacy (sin sufijo de estrategia) o de
+    ejecucións previas no deben mezclarse con los datos de la actual.
+    """
+    import glob
+    pattern = str(output_dir / "*_search*.json")
+    for old_file in sorted(glob.glob(pattern)):
+        try:
+            Path(old_file).unlink()
+            writeLog("info", logger,
+                     f"[Normalize] Eliminado archivo previo: {Path(old_file).name}")
+        except Exception as exc:  # noqa: BLE001
+            writeLog("warning", logger,
+                     f"[Normalize] No se pudo eliminar {old_file}: {exc}")
+
+
 def processNormalizeSearchResults():
     """
     Procesa todas las fuentes definidas en processControl.defaults.get("search").
-
+    
     Dos rutas de ingesta, según `search.providers.<fuente>.mode`:
       - "api"  : proveedor oficial (PubMed/Scopus/IEEE) con snapshot crudo y
                  normalización offline (ver `sources/ingestion/`).
       - "file" : parser del fichero exportado (comportamiento original).
-
+    
     Si una fuente API falla o no tiene credenciales, se degrada a modo file
     cuando existe el fichero correspondiente.
+    
+    NUEVO: Soporta múltiples estrategias de búsqueda definidas en
+    conceptsQuery.json > query_strategies. Cada estrategia tiene sus propias
+    queries y archivos de exportación con sufijo (ej: scopus_export_01.csv).
     """
     input_dir, output_dir = inicioModulo("processNormalizeSearchResults")
 
@@ -853,29 +1024,81 @@ def processNormalizeSearchResults():
              f"Processing {len(sources)} sources from {len(streams)} stream(s): "
              f"{[s['name'] for s in streams]}")
 
+    # Limpiar archivos *_search.json previos en output para evitar mezclar
+    # con ejecucións anteriores (criterio SOA: cada ejecución parte limpia).
+    _clean_previous_search_outputs(output_dir)
+
+    # Leer estrategias de búsqueda desde conceptsQuery.json
+    query_strategies = _load_query_strategies(input_dir)
+    
+    # Si hay estrategias definidas, procesar cada una por separado
+    if query_strategies:
+        writeLog("info", logger,
+                 f"Multiple search strategies detected: {list(query_strategies.keys())}")
+    
     results = {}
 
-    # 1) Ingesta API-first (snapshot crudo + normalize offline)
-    try:
-        from sources.ingestion.manager import run_api_ingestion
-        api_results = run_api_ingestion(search_config, input_dir, output_dir)
-        results.update(api_results)
-    except Exception as exc:
-        writeLog("exception", logger, f"Falló la capa de ingesta API: {exc}")
+    # Si hay estrategias de búsqueda, procesar cada estrategia de forma
+    # independiente: para cada estrategia, primero ingesta API (con la query
+    # de esa estrategia) y luego modo file (archivos con sufijo de estrategia).
+    if query_strategies:
+        for strategy_id, strategy_config in query_strategies.items():
+            writeLog("info", logger,
+                     f"Processing search strategy: {strategy_id}")
 
-    # 2) Fuentes en modo file (o fallback de las API que no resolvieron)
-    for source in sources:
-        if source in results:
-            continue
+            # 2a) Ingesta API-first para esta estrategia (query de la estrategia).
+            try:
+                from sources.ingestion.manager import run_api_ingestion
+                api_results = run_api_ingestion(
+                    search_config, input_dir, output_dir,
+                    strategy_id=strategy_id,
+                )
+                results.update(api_results)
+            except Exception as exc:
+                writeLog("exception", logger,
+                         f"Falló la capa de ingesta API (estrategia {strategy_id}): {exc}")
 
-        file_pattern = search_config.get(source)
-        if not file_pattern:
-            writeLog("warning", logger, f"No file pattern defined for source: {source}")
-            continue
+            # 2b) Fuentes en modo file (o fallback de las API que no resolvieron)
+            # para esta estrategia.
+            for source in sources:
+                file_pattern = search_config.get(source)
+                if not file_pattern:
+                    writeLog("warning", logger,
+                             f"No file pattern defined for source: {source}")
+                    continue
 
-        data = process_source(source, file_pattern, input_dir, output_dir, search_config)
-        if data:
-            results[source] = data
+                data = process_source(source, file_pattern, input_dir, output_dir,
+                                     search_config, query_strategy_id=strategy_id)
+                if data:
+                    # Marcar con la estrategia en cada registro
+                    for record in data:
+                        record.setdefault("query_strategies", [])
+                        if strategy_id not in record["query_strategies"]:
+                            record["query_strategies"].append(strategy_id)
+                    results[f"{source}_{strategy_id}"] = data
+    else:
+        # Comportamiento original: una sola pasada por fuente (API + file).
+        # 1) Ingesta API-first (snapshot crudo + normalize offline)
+        try:
+            from sources.ingestion.manager import run_api_ingestion
+            api_results = run_api_ingestion(search_config, input_dir, output_dir)
+            results.update(api_results)
+        except Exception as exc:
+            writeLog("exception", logger, f"Falló la capa de ingesta API: {exc}")
+
+        # 2) Fuentes en modo file (o fallback de las API que no resolvieron)
+        for source in sources:
+            if source in results:
+                continue
+
+            file_pattern = search_config.get(source)
+            if not file_pattern:
+                writeLog("warning", logger, f"No file pattern defined for source: {source}")
+                continue
+
+            data = process_source(source, file_pattern, input_dir, output_dir, search_config)
+            if data:
+                results[source] = data
 
     total_papers = sum(len(v) for v in results.values())
     writeLog("info", logger, "=" * 60)

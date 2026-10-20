@@ -3,6 +3,7 @@ from sources.common.common import logger, processControl, writeLog
 from sources.common.utils import inicioModulo
 
 import json
+import os
 from pathlib import Path
 import re
 import numbers
@@ -67,6 +68,38 @@ N_SEED_TERMS = 30
 CONCEPT_DEDUP_THRESHOLD = 0.88
 RELEVANT_SECTIONS = ["abstract", "introduction", "methodology", "results", "conclusion"]
 
+# Pesos por sección para embedding global ponderado (section-weighted embedding).
+# Secciones con mayor peso contributivo a la representación semántica del paper.
+# Valores >1 amplifican, <1 atenúan, 0 excluye. 
+# Se cargan desde config.json -> section_weights.presets.<preset> + discovery.section_weight_overrides
+SECTION_WEIGHTS = {
+    "title": 2.0,
+    "abstract": 1.5,
+    "methodology": 2.0,
+    "methods": 2.0,
+    "results": 2.0,
+    "findings": 2.0,
+    "discussion": 1.0,
+    "conclusion": 1.2,
+    "limitations": 0.7,
+    "introduction": 0.5,
+    "background": 0.3,
+    "related_work": 0.2,
+    "acknowledgments": 0.0,
+    "funding": 0.0,
+    "references": 0.0,
+    "bibliography": 0.0,
+}
+
+# Aliases para normalizar nombres de sección (config.json -> section_weights.section_aliases)
+SECTION_ALIASES = {
+    "methods": "methodology",
+    "findings": "results",
+    "background": "related_work",
+    "related work": "related_work",
+    "related-work": "related_work",
+}
+
 # Síntesis del contexto de estudio (ancla de similitud coseno)
 SYNTHESIS_MIN_TOKENS = 300
 SYNTHESIS_MAX_TOKENS = 600
@@ -91,9 +124,32 @@ def load_discovery_config() -> None:
     global EMBEDDING_MODEL, SECTION_FILTER_THRESHOLD, SECTION_FILTER_ALPHA, \
         OFF_TOPIC_THRESHOLD, OFF_TOPIC_ALPHA, MIN_TOPICS_PER_RQ, MIN_PAPERS_PER_TOPIC, \
         N_SEED_TERMS, SYNTHESIS_MIN_TOKENS, SYNTHESIS_MAX_TOKENS, SYNTHESIS_MAX_CHARS, \
-        CONCEPT_DEDUP_THRESHOLD
+        CONCEPT_DEDUP_THRESHOLD, SECTION_WEIGHTS, SECTION_ALIASES
 
     EMBEDDING_MODEL = disc.get("embedding_model", EMBEDDING_MODEL)
+    # Resolver rutas relativas del modelo de embeddings respecto al directorio
+    # de input de la investigación actual (results/input/<subject>/).
+    # Si la ruta relativa no existe o no es un modelo válido (primera pasada
+    # sin fine-tuning), se usa el modelo base.
+    if EMBEDDING_MODEL and (EMBEDDING_MODEL.startswith("./") or EMBEDDING_MODEL.startswith("../")):
+        real_path = getattr(processControl, "env", {}).get("realPath", "")
+        subject = getattr(processControl, "args", None)
+        subject_name = subject.subject if subject and hasattr(subject, "subject") else ""
+        results_root = processControl.env.get("results_root") or "results"
+        base_dir = os.path.join(real_path, results_root, "input", subject_name)
+        resolved = os.path.normpath(os.path.join(base_dir, EMBEDDING_MODEL))
+        # Verificar que sea un directorio de modelo válido (tiene config.json)
+        config_file = os.path.join(resolved, "config.json")
+        if os.path.isdir(resolved) and os.path.exists(config_file):
+            EMBEDDING_MODEL = resolved
+            writeLog("info", logger,
+                     f"[Discovery] Usando modelo fine-tuneado: {resolved}")
+        else:
+            writeLog("warning", logger,
+                     f"[Discovery] Modelo fine-tuneado no válido o no encontrado en: {resolved}")
+            writeLog("info", logger,
+                     f"[Discovery] Usando modelo base: BAAI/bge-base-en-v1.5")
+            EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
     SECTION_FILTER_THRESHOLD = float(disc.get("section_filter_threshold", SECTION_FILTER_THRESHOLD))
     SECTION_FILTER_ALPHA = float(disc.get("section_filter_alpha", SECTION_FILTER_ALPHA))
     OFF_TOPIC_THRESHOLD = float(disc.get("off_topic_threshold", OFF_TOPIC_THRESHOLD))
@@ -105,6 +161,24 @@ def load_discovery_config() -> None:
     SYNTHESIS_MAX_TOKENS = int(disc.get("synthesis_max_tokens", SYNTHESIS_MAX_TOKENS))
     SYNTHESIS_MAX_CHARS = int(disc.get("synthesis_max_chars", SYNTHESIS_MAX_CHARS))
     CONCEPT_DEDUP_THRESHOLD = float(disc.get("concept_dedup_threshold", CONCEPT_DEDUP_THRESHOLD))
+
+    # Cargar pesos de secciones desde preset compartido + overrides
+    sw_config = defaults.get("section_weights", {})
+    presets = sw_config.get("presets", {}) if isinstance(sw_config, dict) else {}
+    preset_name = disc.get("section_weights_preset", "technical_paper")
+    base_weights = dict(presets.get(preset_name, {}))
+    
+    # Aplicar overrides específicos de discovery
+    overrides = disc.get("section_weight_overrides", {})
+    if isinstance(overrides, dict):
+        base_weights.update(overrides)
+    
+    # Cargar aliases para normalización de nombres de sección
+    SECTION_ALIASES = sw_config.get("section_aliases", {}) if isinstance(sw_config, dict) else {}
+    
+    # Mutar en lugar de reasignar para que imports tipo "from module import SECTION_WEIGHTS" vean el cambio
+    SECTION_WEIGHTS.clear()
+    SECTION_WEIGHTS.update(base_weights)
 
 # UMAP / HDBSCAN
 UMAP_COMPONENTS = 8
@@ -282,7 +356,8 @@ def synthesize_study_context(study_text: str, concepts_query: dict, focus_terms:
     return combined[:SYNTHESIS_MAX_CHARS]
 
 
-def extract_study_seeds(study_text: str, concepts_query: dict, focus_terms: list[str]) -> tuple[
+def extract_study_seeds(study_text: str, concepts_query: dict, focus_terms: list[str],
+                        full_corpus: list[dict] = None) -> tuple[
     list[str], list[list[str]]]:
     generic_terms = {"natural", "language", "processing", "model", "system", "using", "based", "approach", "method",
                      "data", "learning", "deep", "neural", "paper", "study", "result", "performance", "task", "dataset",
@@ -294,6 +369,39 @@ def extract_study_seeds(study_text: str, concepts_query: dict, focus_terms: list
             study_keywords = [k.strip().lower() for k in raw.replace("·", ",").split(",") if
                               k.strip() and len(k.strip()) > 2 and k.strip() not in generic_terms]
             break
+
+    # Extraer seeds de campos estructurados (contributions, methodology, results)
+    structured_seeds = []
+    if full_corpus:
+        for paper in full_corpus:
+            structured = paper.get("structured", {})
+            if not structured or structured.get("skipped"):
+                continue
+            # Contribuciones
+            for c in structured.get("contributions", []):
+                structured_seeds.extend(c.lower().split())
+            # Metodología
+            method = structured.get("methodology", {})
+            if isinstance(method, dict):
+                for k in ["approach", "architecture"]:
+                    if method.get(k):
+                        structured_seeds.extend(method[k].lower().split())
+                if method.get("datasets"):
+                    structured_seeds.extend(method["datasets"])
+                if method.get("signal_modalities"):
+                    structured_seeds.extend(method["signal_modalities"])
+                if method.get("metrics"):
+                    structured_seeds.extend(method["metrics"])
+            # Resultados
+            results = structured.get("results", {})
+            if isinstance(results, dict):
+                if results.get("main"):
+                    structured_seeds.extend(results["main"].lower().split())
+                for a in results.get("ablation", []):
+                    structured_seeds.extend(a.lower().split())
+    # Filtrar y deduplicar structured seeds
+    structured_seeds = [t.strip(".,?():") for t in structured_seeds if len(t) > 3 and t not in generic_terms]
+    structured_seeds = list(dict.fromkeys(structured_seeds))[:50]  # top 50 únicos
 
     seed_topic_list, concept_seed_terms = [], []
     for concept in concepts_query.get("concepts", []):
@@ -308,6 +416,9 @@ def extract_study_seeds(study_text: str, concepts_query: dict, focus_terms: list
         concept_seed_terms.extend(top_terms[:6])
 
     all_seeds = []
+    # Prioridad: structured_seeds > focus_terms > study_keywords > concept_seed_terms
+    for term in structured_seeds:
+        if term not in generic_terms: all_seeds.extend([term] * 3)
     for term in focus_terms:
         if term not in generic_terms: all_seeds.extend([term] * 5)
     for term in study_keywords:
@@ -338,6 +449,170 @@ def build_text(paper: dict, seed_terms: Optional[list[str]] = None, max_section_
         full_text = paper.get("full_text", "")
         if full_text and len(full_text) > 500: parts.append(full_text[:max_section_chars * 2])
     return " ".join(parts)
+
+
+def merge_structured_into_paper(paper: dict, structured: dict) -> dict:
+    """
+    Fusiona información estructurada (de papers_structured.json) en el paper.
+    Los campos estructurados tienen prioridad para enriquecer el texto.
+    """
+    if not structured or structured.get("skipped"):
+        return paper
+    
+    merged = dict(paper)
+    
+    # Añadir campos estructurados como secciones virtuales para embeddings
+    structured_sections = {}
+    
+    # Contribuciones
+    contribs = structured.get("contributions", [])
+    if contribs:
+        structured_sections["contributions"] = "\n".join(f"- {c}" for c in contribs)
+    
+    # Metodología estructurada
+    method = structured.get("methodology", {})
+    if isinstance(method, dict):
+        method_parts = []
+        for k in ["approach", "architecture"]:
+            if method.get(k):
+                method_parts.append(f"{k}: {method[k]}")
+        if method.get("datasets"):
+            method_parts.append(f"datasets: {', '.join(method['datasets'])}")
+        if method.get("baselines"):
+            method_parts.append(f"baselines: {', '.join(method['baselines'])}")
+        if method.get("metrics"):
+            method_parts.append(f"metrics: {', '.join(method['metrics'])}")
+        if method.get("signal_modalities"):
+            method_parts.append(f"signals: {', '.join(method['signal_modalities'])}")
+        if method_parts:
+            structured_sections["methodology_structured"] = "\n".join(method_parts)
+    
+    # Resultados estructurados
+    results = structured.get("results", {})
+    if isinstance(results, dict):
+        res_parts = []
+        if results.get("main"):
+            res_parts.append(f"main: {results['main']}")
+        if results.get("ablation"):
+            res_parts.append(f"ablation: {'; '.join(results['ablation'])}")
+        if results.get("key_numbers"):
+            res_parts.append(f"key_numbers: {'; '.join(results['key_numbers'])}")
+        if res_parts:
+            structured_sections["results_structured"] = "\n".join(res_parts)
+    
+    # Limitaciones y future work
+    if structured.get("limitations"):
+        structured_sections["limitations"] = "\n".join(f"- {l}" for l in structured["limitations"])
+    if structured.get("future_work"):
+        structured_sections["future_work"] = "\n".join(f"- {f}" for f in structured["future_work"])
+    
+    # Takeaway
+    if structured.get("takeaway"):
+        structured_sections["takeaway"] = structured["takeaway"]
+    
+    # Merge con clean_sections existente
+    existing_sections = merged.get("clean_sections", {}) or merged.get("sections", {})
+    merged["clean_sections"] = {**existing_sections, **structured_sections}
+    
+    # También guardar campos estructurados directos para uso posterior
+    merged["structured"] = structured
+    
+    return merged
+
+
+def load_structured_papers(output_dir: Path) -> Dict[str, dict]:
+    """Carga papers_structured.json y retorna dict paper_id -> structured_data."""
+    structured_file = output_dir / "papers_structured.json"
+    if not structured_file.exists():
+        return {}
+    try:
+        with open(structured_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return {p.get("paper_id"): p for p in data if p.get("paper_id")}
+    except Exception as e:
+        writeLog("warning", logger, f"[Discovery] Could not load papers_structured.json: {e}")
+    return {}
+
+
+def compute_section_weighted_embedding(
+    paper: dict,
+    embedding_model: SentenceTransformer,
+    weights: dict = None,
+    max_section_chars: int = 8000
+) -> Optional[np.ndarray]:
+    """
+    Computa embedding ponderado por sección para un paper.
+    Combina embeddings de secciones individuales con pesos configurables.
+    
+    Args:
+        paper: Dict con 'title', 'clean_sections', etc.
+        embedding_model: SentenceTransformer cargado
+        weights: Dict {section_name: weight}. Si None, usa SECTION_WEIGHTS global.
+        max_section_chars: Límite de caracteres por sección
+    
+    Returns:
+        np.ndarray normalizado (unit vector) o None si no hay texto válido
+    """
+    if weights is None:
+        weights = SECTION_WEIGHTS
+    
+    # Normalizar nombres de sección en el paper usando aliases
+    sections_raw = paper.get("clean_sections", {}) or paper.get("sections", {})
+    sections = {}
+    for sec_name, sec_text in sections_raw.items():
+        canonical = SECTION_ALIASES.get(sec_name.lower(), sec_name)
+        # Si ya existe la canónica, concatenar (ej. "methods" + "methodology")
+        if canonical in sections:
+            sections[canonical] = sections[canonical] + "\n" + sec_text
+        else:
+            sections[canonical] = sec_text
+    
+    embeddings = []
+    wts = []
+    
+    # Title (siempre presente, peso alto)
+    title = paper.get("title", "").strip()
+    if title:
+        emb = embedding_model.encode(title, normalize_embeddings=True)
+        embeddings.append(emb)
+        wts.append(weights.get("title", 1.0))
+    
+    # Abstract (si existe por separado de clean_sections)
+    abstract = paper.get("abstract", "").strip()
+    if abstract:
+        emb = embedding_model.encode(abstract[:max_section_chars], normalize_embeddings=True)
+        embeddings.append(emb)
+        wts.append(weights.get("abstract", 1.0))
+    
+    # Secciones del clean_sections (ya normalizadas)
+    for sec_name, weight in weights.items():
+        if sec_name in ("title", "abstract") or weight <= 0:
+            continue
+        sec_text = sections.get(sec_name, "").strip()
+        if sec_text and len(sec_text) > 50:
+            emb = embedding_model.encode(sec_text[:max_section_chars], normalize_embeddings=True)
+            embeddings.append(emb)
+            wts.append(weight)
+    
+    # Fallback: si no hay secciones con peso >0, usar clean_text truncado
+    if not embeddings:
+        clean_text = paper.get("clean_text", "").strip()
+        if clean_text and len(clean_text) > 100:
+            emb = embedding_model.encode(clean_text[:max_section_chars * 2], normalize_embeddings=True)
+            return emb
+        return None
+    
+    # Promedio ponderado y renormalización
+    wts = np.array(wts, dtype=np.float32)
+    if wts.sum() == 0:
+        return None
+    
+    weighted = np.average(embeddings, axis=0, weights=wts)
+    norm = np.linalg.norm(weighted)
+    if norm > 0:
+        weighted = weighted / norm
+    return weighted
 
 
 def collect_candidate_sections(clean_corpus: list[dict], seed_terms: list[str], max_section_chars: int = 8000) -> List[
@@ -651,8 +926,22 @@ def processDiscoveryEngine():
     with open(text_file, "r", encoding="utf-8") as f:
         full_corpus = json.load(f)
 
+    # --- Cargar y fusionar información estructurada (papers_structured.json) ---
+    structured_map = load_structured_papers(output_dir)
+    if structured_map:
+        writeLog("info", logger, f"[Discovery] Loaded {len(structured_map)} structured papers, merging...")
+        merged_count = 0
+        for p in full_corpus:
+            pid = p.get("paper_id")
+            if pid in structured_map:
+                p = merge_structured_into_paper(p, structured_map[pid])
+                merged_count += 1
+        writeLog("info", logger, f"[Discovery] Merged structured data into {merged_count} papers")
+    else:
+        writeLog("info", logger, "[Discovery] No structured papers found (papers_structured.json not present)")
+
     study_text, concepts_query, focus_terms = load_study_context(input_dir)
-    seed_terms, seed_topic_list = extract_study_seeds(study_text, concepts_query, focus_terms)
+    seed_terms, seed_topic_list = extract_study_seeds(study_text, concepts_query, focus_terms, full_corpus)
 
     embedding_model = SentenceTransformer(EMBEDDING_MODEL)
     # Ancla de similitud coseno: síntesis de studyDescription + conceptsQuery
@@ -662,13 +951,26 @@ def processDiscoveryEngine():
     focus_embedding = embedding_model.encode(" ".join(focus_terms), normalize_embeddings=True) if focus_terms else None
 
     # -----------------------------------------------------------------
-    # OPTIMIZACIÓN SOA: Calcular embeddings UNA SOLA VEZ
-    # FIX: Usar 'clean_text' (que es donde está el abstract real en este JSON)
+    # OPTIMIZACIÓN SOA: Calcular embeddings globales ponderados por sección
+    # Section-weighted embeddings: title, abstract, methodology, results, conclusion
+    # tienen más peso que introduction, related_work, etc.
     # -----------------------------------------------------------------
-    writeLog("info", logger, f"[Discovery] Computing global text embeddings for {len(full_corpus)} papers...")
+    writeLog("info", logger, f"[Discovery] Computing section-weighted global embeddings for {len(full_corpus)} papers...")
+    global_embeddings = []
+    for p in full_corpus:
+        emb = compute_section_weighted_embedding(p, embedding_model, SECTION_WEIGHTS)
+        if emb is not None:
+            global_embeddings.append(emb)
+        else:
+            # Fallback: embedding de clean_text truncado
+            fallback_text = p.get("title", "") + " " + p.get("clean_text", "")[:1500]
+            emb = embedding_model.encode(fallback_text, normalize_embeddings=True)
+            global_embeddings.append(emb)
+    global_abstract_embeddings = np.array(global_embeddings)
+    writeLog("info", logger, f"[Discovery] Computed {len(global_abstract_embeddings)} section-weighted embeddings")
+
+    # full_texts needed for hard filter lexical matching (title + clean_text)
     full_texts = [p.get("title", "") + " " + p.get("clean_text", "")[:1500] for p in full_corpus]
-    global_abstract_embeddings = embedding_model.encode(full_texts, normalize_embeddings=True, batch_size=64,
-                                                        show_progress_bar=False)
 
     rq_list = concepts_query.get("concepts", [])
 

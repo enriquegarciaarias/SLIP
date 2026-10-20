@@ -37,6 +37,10 @@ ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
 
 _VERSION_RE = re.compile(r"v\d+$", re.IGNORECASE)
 
+# Umbral mínimo de caracteres para considerar un abstract como "completo".
+# Abstracts más cortos se consideran incompletos y se intenta recuperar.
+MIN_ABSTRACT_LEN = 100
+
 
 def _normalize_arxiv_id(value: str) -> str:
     """Normaliza un id de arXiv quitando URL/versión: `2610.02866v1` -> `2610.02866`."""
@@ -83,7 +87,7 @@ def _recover_via_openalex(
 ) -> int:
     recovered = 0
     for record in records:
-        if not needs_abstract_recovery(record.get("abstract")):
+        if not _abstract_needs_recovery(record.get("abstract")):
             continue
         doi = doi_getter(record) or ""
         full = fetch_openalex_abstract(doi, client, mailto)
@@ -131,7 +135,7 @@ def fetch_arxiv_abstracts(ids: List[str], client: HttpClient, batch_size: int = 
 
 
 def _recover_arxiv_api(records: List[dict], client: HttpClient, batch_size: int = 50) -> int:
-    pending = [r for r in records if needs_abstract_recovery(r.get("abstract"))]
+    pending = [r for r in records if _abstract_needs_recovery(r.get("abstract"))]
     ids = [r.get("arxiv_id") for r in pending if r.get("arxiv_id")]
     if not ids:
         return 0
@@ -158,45 +162,65 @@ def _arxiv_doi(record: dict) -> str:
     return f"{ARXIV_DOI_PREFIX}{aid}" if aid else (record.get("doi") or "")
 
 
+def _abstract_needs_recovery(abstract: Optional[str]) -> bool:
+    """Determina si un abstract necesita recuperación.
+
+    Se considera que necesita recuperación si:
+      - está vacío o es None, o
+      - termina en elipsis (… o ...), o
+      - es muy corto (menos de MIN_ABSTRACT_LEN caracteres).
+    """
+    if not abstract:
+        return True
+    stripped = abstract.strip()
+    if not stripped:
+        return True
+    if "\u2026" in stripped or stripped.endswith("..."):
+        return True
+    if len(stripped) < MIN_ABSTRACT_LEN:
+        return True
+    return False
+
+
 def recover_abstracts(
     records: List[dict],
     source: str,
     search_config: Optional[Dict[str, Any]] = None,
     client: Optional[HttpClient] = None,
 ) -> int:
-    """Recupera los abstracts truncados de `records` (in-place). Devuelve cuántos."""
+    """Recupera los abstracts ausentes, truncados o demasiado cortos de `records` (in-place). Devuelve cuántos.
+
+    Estrategia universal (funciona para cualquier fuente):
+      1. OpenAlex por DOI — para cualquier registro que tenga DOI.
+      2. API de arXiv — para registros que tengan arxiv_id (fallback opcional).
+    """
     search_config = search_config or {}
     recovery_cfg = search_config.get("abstract_recovery", {}) or {}
     if not recovery_cfg.get("enabled", True):
         writeLog("info", logger, f"[{source.upper()}] Recuperación de abstracts desactivada")
         return 0
 
-    if not any(needs_abstract_recovery(r.get("abstract")) for r in records):
+    if not any(_abstract_needs_recovery(r.get("abstract")) for r in records):
         return 0
 
     provider_cfg = (search_config.get("providers", {}) or {}).get(source, {}) or {}
     mailto = (provider_cfg.get("email") or search_config.get("email") or "").strip()
 
-    # Vía principal: OpenAlex.
     client = client or _build_client(search_config)
-    if source == "acm":
-        recovered = _recover_via_openalex(records, client, lambda r: r.get("doi", ""), mailto)
-    elif source == "arxiv":
-        recovered = _recover_via_openalex(records, client, _arxiv_doi, mailto)
-    else:
-        writeLog("warning", logger, f"[{source.upper()}] Sin estrategia de recuperación de abstracts")
-        return 0
 
-    # Fallback: API de arXiv para lo que OpenAlex no tenga.
-    if source == "arxiv" and recovery_cfg.get("arxiv_fallback", True):
-        if any(needs_abstract_recovery(r.get("abstract")) for r in records):
+    # Vía principal: OpenAlex por DOI (cualquier fuente que tenga DOI).
+    recovered = _recover_via_openalex(records, client, lambda r: r.get("doi", ""), mailto)
+
+    # Fallback: API de arXiv para registros con arxiv_id que sigan sin abstract.
+    if recovery_cfg.get("arxiv_fallback", True):
+        if any(_abstract_needs_recovery(r.get("abstract")) for r in records):
             arxiv_client = _build_client(search_config, backoff_seconds=10.0, max_retries=2)
             recovered += _recover_arxiv_api(
                 records, arxiv_client,
                 batch_size=int(recovery_cfg.get("arxiv_batch_size", 50)),
             )
 
-    pending = sum(1 for r in records if needs_abstract_recovery(r.get("abstract")))
+    pending = sum(1 for r in records if _abstract_needs_recovery(r.get("abstract")))
     writeLog("info", logger,
              f"[{source.upper()}] Abstracts recuperados: {recovered} "
              f"(quedan {pending} sin completar de {len(records)})")

@@ -91,6 +91,7 @@ Cada estudio se organiza por un **subject** en `results/input/{subject}/` (p. ej
 results/input/{subject}/
 ├── studyDescription.json     # Descripción del estudio (objetivos, keywords, focus_terms)
 ├── conceptsQuery.json        # Query de búsqueda + conceptos/preguntas de investigación
+├── personalizacion.json      # (opcional) Blacklist y personalización del investigador
 ├── wos_export.txt            # Resultados exportados de Web of Science
 ├── scopus_export.csv         # Resultados exportados de Scopus
 ├── ieee_export.csv           # Resultados exportados de IEEE Xplore
@@ -157,6 +158,37 @@ Para incorporar PDFs "semilla" de forma manual:
 
 > El scanner de PDFs (`manualPapersScanner`) rellena `manual_papers.json` automáticamente, por lo
 > que en la práctica basta con dejar los PDFs en la carpeta.
+
+### Personalización y blacklist (feedback iterativo, opcional)
+
+Para incorporar el feedback del investigador tras revisar `training_materials.md`, crea
+`results/input/{subject}/personalizacion.json`:
+
+```json
+{
+  "version": 1,
+  "blacklist": {
+    "ids": ["pubmed_999", "doi_10.1234/xyz"],
+    "reason": "Excluidos por falta de relevancia temática"
+  },
+  "metadata": {
+    "created": "2026-10-14",
+    "author": "investigadorX",
+    "notes": "Primera versión de personalización"
+  },
+  "custom": {}
+}
+```
+
+- **`blacklist.ids`**: lista de `paper_id` a excluir (p. ej. `pubmed_999`, `doi_10.1234/xyz`).
+  Se filtran **antes de descargar PDFs** (paso 6) y **al generar `training_materials.md`** (paso 16):
+  no consumen cuota de descarga, no aparecen en PRISMA, bibliografía ni hallazgos.
+- **`metadata`**: trazabilidad (fecha, autor, notas).
+- **`custom`**: reservado para futuras extensiones.
+- **`version`**: para migraciones de esquema.
+
+> Basta añadir IDs a `blacklist.ids` y volver a ejecutar el pipeline (o solo pasos 6 y 16) para que
+> los papers desaparezcan de todo el flujo.
 
 ### Manuscrito del investigador (opcional, `--manuscript 1`)
 
@@ -233,7 +265,7 @@ Todo se genera en `results/output/{subject}/`:
 | Selección | `selected_papers.json`, `review_original.pdf`, `review_es.pdf` |
 | Adquisición | `pdfs/`, `selected_acquired.json`, `pdf_download_log.json`, `missing_pdfs.json`, `pdf_inventory.json` |
 | Corpus | `papers_metadata.json`, `papers_text.json` |
-| Análisis | `candidate_concepts.json`, `concept_candidates.json`, `aligned_concepts.json`, `concept_evidence.json`, `clustered_evidences.json`, `enriched_evidences.json`, `concept_findings.json`, `technical_annex.json` |
+| Análisis | `candidate_concepts.json`, `candidate_concepts_by_rq.json`, `concept_candidates.json`, `aligned_concepts.json`, `concept_evidence.json`, `clustered_evidences.json`, `enriched_evidences.json`, `concept_findings.json`, `narrative_summaries.json`, `technical_annex.json` |
 | Manuscrito (si `--manuscript 1`) | `manuscript_refs.json`, `manuscript_context_cache.json` |
 | Documentos finales | `training_materials.md`, `related_work.md` |
 
