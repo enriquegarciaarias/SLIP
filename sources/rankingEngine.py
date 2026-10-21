@@ -1,7 +1,7 @@
 # rankingEngine.py
 from sources.common.common import logger, processControl, writeLog
 from sources.common.streams import load_streams
-from sources.common.utils import inicioModulo, load_url_blacklist, is_url_blacklisted
+from sources.common.utils import inicioModulo, load_url_blacklist, is_url_blacklisted, sha1, normalized_title
 
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
@@ -204,6 +204,42 @@ def select_top_k(ranked_papers: list[dict], k: int = TOP_K) -> list[dict]:
     return ranked_papers[:k]
 
 
+def _get_global_id(paper: dict) -> str | None:
+    """Calcula el global_id de un paper igual que en manualIngestion / searchMerge."""
+    doi = (paper.get("doi") or "").strip().lower()
+    if doi:
+        return f"doi:{doi}"
+    title = normalized_title(paper.get("title", ""))
+    if title:
+        return f"title:{sha1(title)}"
+    return None
+
+
+def _load_manual_global_ids(input_dir: Path) -> set[str]:
+    """
+    Lee manual_papers.json (si existe) y devuelve el set de global_ids
+    de los papers manuales. Se usa para excluirlos del ranking antes de
+    aplicar top_k, de modo que no ocupen cupo de búsqueda y dejen espacio
+    para el siguiente paper relevante.
+    """
+    manual_json = input_dir / "manual_papers" / "manual_papers.json"
+    if not manual_json.exists():
+        return set()
+
+    try:
+        with open(manual_json, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+    except Exception:
+        return set()
+
+    ids: set[str] = set()
+    for entry in entries:
+        gid = _get_global_id(entry)
+        if gid:
+            ids.add(gid)
+    return ids
+
+
 def _stream_ranking_query(stream: dict, study_query: str) -> str:
     """Query de embedding para rankear un flujo: ranking_query > query > estudio."""
     return (stream.get("ranking_query") or stream.get("query") or study_query).strip()
@@ -307,6 +343,21 @@ def processRankingEngine():
         if removed:
             writeLog("info", logger,
                      f"[RankingEngine] Dominios blacklisteados: {sorted(url_blacklist)}")
+
+    # --- EXCLUIR PAPERS MANUALES ANTES DEL RANKING ---
+    # Los papers ya definidos en manual_papers.json no ocupan cupo de top_k;
+    # se añaden después vía manualIngestion sin límite. Esto garantiza que
+    # si límite=130 y hay 10 manuales, el total puede ser 140 (130 búsqueda +
+    # 10 manuales), y que un duplicado búsqueda↔manual libera su cupo para
+    # el siguiente paper relevante de búsqueda.
+    manual_global_ids = _load_manual_global_ids(input_dir)
+    if manual_global_ids:
+        before = len(papers)
+        papers = [p for p in papers if p.get("global_id") not in manual_global_ids]
+        removed = before - len(papers)
+        writeLog("info", logger,
+                 f"[RankingEngine] Papers manuales excluidos del ranking: {removed} "
+                 f"(no ocupan cupo de top_k={TOP_K}), quedan {len(papers)}")
 
     study_query = build_query_from_study_description(study_desc)
     if not study_query.strip():

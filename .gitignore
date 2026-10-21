@@ -7,6 +7,7 @@ ProcessLog.txt
 
 models/
 results/
+out/
 
 # Allow paper folder for version control
 !results/output/AERASOA/Springer/

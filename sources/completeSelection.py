@@ -28,6 +28,7 @@ Uso dentro del pipeline (main.py):
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from collections import defaultdict
 from datetime import datetime
@@ -109,12 +110,38 @@ def _count_by_strategy_and_source(search_dir: Path, availables: list[str]) -> di
     }
 
 
+# Venues / conferencias objetivo para cuantificación en el informe PRISMA
+PRISMA_TARGET_VENUES = [
+    "ACL", "SIGIR", "ECIR", "EMNLP", "COLING", "WWW",
+    "CKIM", "CONLL", "NAACL", "EACL", "ICTIR",
+]
+
+
+def _count_papers_by_venue(selected_papers: list[dict]) -> dict[str, int]:
+    """
+    Cuenta cuántos papers seleccionados pertenecen a cada venue objetivo.
+    El matching es case-insensitive y por subcadena sobre el campo `venue`.
+    Un paper puede contarse en múltiples venues si su venue menciona varios
+    (poco común pero posible en actas conjuntas).
+    """
+    counts: dict[str, int] = {v: 0 for v in PRISMA_TARGET_VENUES}
+    for p in selected_papers or []:
+        venue = str(p.get("venue") or "").lower()
+        if not venue:
+            continue
+        for target in PRISMA_TARGET_VENUES:
+            if target.lower() in venue:
+                counts[target] += 1
+    return counts
+
+
 def _build_prisma_md(output_dir: Path, input_dir: Path,
                      search_config: dict,
                      availables: list[str],
                      selected_count: int,
                      copied_count: int,
-                     not_found_count: int) -> str:
+                     not_found_count: int,
+                     selected_papers: list[dict] | None = None) -> str:
     """
     Construye el contenido del archivo prisma.md con todas las estadísticas
     del proceso de selección PRISMA.
@@ -518,6 +545,25 @@ def _build_prisma_md(output_dir: Path, input_dir: Path,
     lines.append("")
 
     # ------------------------------------------------------------------
+    # 6.5. Distribución por venue / conferencia objetivo
+    # ------------------------------------------------------------------
+    venue_counts = _count_papers_by_venue(selected_papers)
+    total_target = sum(venue_counts.values())
+
+    lines.append("## 6.5. Distribución de papers seleccionados por venue / conferencia")
+    lines.append("")
+    lines.append(
+        f"Total de papers cuyo venue coincide con alguna conferencia objetivo: "
+        f"{total_target} de {selected_count} seleccionados."
+    )
+    lines.append("")
+    lines.append("| Venue / Conferencia | Papers |")
+    lines.append("|---------------------|--------|")
+    for venue in PRISMA_TARGET_VENUES:
+        lines.append(f"| {venue} | {venue_counts[venue]} |")
+    lines.append("")
+
+    # ------------------------------------------------------------------
     # 7. Flujo PRISMA resumido (formato clásico)
     # ------------------------------------------------------------------
     lines.append("## 7. Flujo PRISMA resumido")
@@ -656,6 +702,7 @@ def processCompleteSelection() -> Optional[Path]:
         selected_count=len(paper_ids),
         copied_count=len(copied),
         not_found_count=len(not_found),
+        selected_papers=selected,
     )
 
     prisma_path = output_dir / "prisma.md"

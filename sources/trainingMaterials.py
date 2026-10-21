@@ -166,28 +166,6 @@ class SearchStrategyStats:
     focus_terms_used: bool
 
 
-@dataclass(frozen=True)
-class PrismaStats:
-    """Números del flujo PRISMA derivados directamente del pipeline."""
-    db_counts: Dict[str, int]
-    strategy_counts: Dict[str, int]   # NUEVO: conteos por estrategia de búsqueda
-    total_identified: int
-    duplicates_removed: int
-    after_dedup: int
-    records_screened: int
-    excluded_screening: int
-    sought_for_retrieval: int
-    not_retrieved: int
-    assessed_for_eligibility: int
-    included_in_concepts: int
-    excluded_not_in_concepts: int
-    excluded_emerging_only: int
-    excluded_no_concept: int
-    not_retrieved_papers: Tuple[Tuple[str, str], ...]      # (paper_id, title)
-    excluded_emerging_papers: Tuple[Tuple[str, str], ...]  # (paper_id, title)
-    excluded_no_concept_papers: Tuple[Tuple[str, str], ...]  # (paper_id, title)
-
-
 class CitationRegistry:
     """Asigna un número de referencia global, por orden de primera aparición."""
 
@@ -210,7 +188,6 @@ class CitationRegistry:
 class DocumentModel:
     generated_at: str
     search_stats: SearchStrategyStats
-    prisma: PrismaStats
     concept_cards: Tuple[ConceptCard, ...]
     emerging_topics: Tuple[EmergingTopic, ...]
     technical_concepts: Tuple[Dict, ...]
@@ -349,7 +326,6 @@ class DocumentDataBuilder:
         papers_text: Dict,
         objectives_text: str,                     # NUEVO
         metadata_lookup: Dict[str, Dict],         # NUEVO
-        prisma_raw: Dict,                         # NUEVO: conteos brutos para PRISMA
         manuscript_evidence: Optional[ManuscriptEvidence] = None,
     ) -> DocumentModel:
         aligned_lookup = {
@@ -397,15 +373,10 @@ class DocumentDataBuilder:
         bibliography = self._build_bibliography(
             included_ids, emerging_paper_ids, metadata_lookup
         )
-        prisma = self._build_prisma(
-            papers_text, candidate_concepts, included_ids, emerging_paper_ids,
-            prisma_raw, metadata_lookup,
-        )
 
         return DocumentModel(
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             search_stats=search_stats,
-            prisma=prisma,
             concept_cards=concept_cards,
             emerging_topics=emerging_topics,
             technical_concepts=tuple(concepts_with_tech),
@@ -608,65 +579,6 @@ class DocumentDataBuilder:
             }
         return bibliography
 
-    @staticmethod
-    def _build_prisma(
-        papers_text: Dict,
-        candidate_concepts: Dict,
-        included_ids: set,
-        emerging_paper_ids: set,
-        prisma_raw: Dict,
-        metadata_lookup: Dict[str, Dict],
-    ) -> PrismaStats:
-        """
-        Deriva los números del flujo PRISMA a partir de los datos del pipeline.
-        prisma_raw: {"db_counts": {..}, "n_duplicates": int, "n_sought": int,
-                     "n_not_retrieved": int}
-        """
-        db_counts = prisma_raw.get("db_counts", {})
-        total_identified = sum(db_counts.values())
-        duplicates_removed = prisma_raw.get("n_duplicates", 0)
-        after_dedup = total_identified - duplicates_removed
-        records_screened = after_dedup
-        sought = prisma_raw.get("n_sought", 0)
-        excluded_screening = max(0, records_screened - sought)
-        not_retrieved = prisma_raw.get("n_not_retrieved", 0)
-        assessed = len(papers_text)
-        included = len(included_ids)
-        emerging_only = sorted(emerging_paper_ids - included_ids)
-        full_text_ids = set(papers_text.keys())
-        no_concept = sorted(full_text_ids - included_ids - emerging_paper_ids)
-
-        def _title(pid: str) -> str:
-            meta_title = metadata_lookup.get(pid, {}).get("title", "")
-            if meta_title:
-                return meta_title
-            paper = papers_text.get(pid)
-            return (paper or {}).get("title", "") or pid
-
-        not_retrieved_papers = [
-            (str(x.get("paper_id")), x.get("title") or "")
-            for x in prisma_raw.get("not_retrieved_papers", [])
-        ]
-
-        return PrismaStats(
-            db_counts=dict(db_counts),
-            strategy_counts=prisma_raw.get("strategy_counts", {}),
-            total_identified=total_identified,
-            duplicates_removed=duplicates_removed,
-            after_dedup=after_dedup,
-            records_screened=records_screened,
-            excluded_screening=excluded_screening,
-            sought_for_retrieval=sought,
-            not_retrieved=not_retrieved,
-            assessed_for_eligibility=assessed,
-            included_in_concepts=included,
-            excluded_not_in_concepts=len(emerging_only) + len(no_concept),
-            excluded_emerging_only=len(emerging_only),
-            excluded_no_concept=len(no_concept),
-            not_retrieved_papers=tuple(not_retrieved_papers),
-            excluded_emerging_papers=tuple((pid, _title(pid)) for pid in emerging_only),
-            excluded_no_concept_papers=tuple((pid, _title(pid)) for pid in no_concept),
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -703,8 +615,6 @@ class MarkdownRenderer:
         sections = [
             self._render_header(model),
             self._render_search_stats(model.search_stats),
-            "---\n",
-            self._render_prisma(model.prisma),
             "---\n",
             self._render_concept_summary(model.concept_cards),
             "---\n",
@@ -783,61 +693,6 @@ class MarkdownRenderer:
             f"- **Umbral de relevancia:** {stats.relevance_threshold}\n"
             f"- **Mín. docs por concepto:** {stats.min_docs_after_rerank}\n"
             f"- **Focus terms:** {'Sí' if stats.focus_terms_used else 'No'}\n"
-        )
-
-    def _render_prisma(self, stats: PrismaStats) -> str:
-        db = ", ".join(f"{k}: {v}" for k, v in stats.db_counts.items())
-        # Estrategias de búsqueda
-        strategy_lines = ""
-        if stats.strategy_counts:
-            strategy_lines = "\n### Por estrategia de búsqueda\n"
-            for sid in sorted(stats.strategy_counts.keys()):
-                strategy_lines += f"- **Estrategia {sid}:** {stats.strategy_counts[sid]} registros\n"
-            strategy_lines += "\n"
-        
-        return (
-            "## Flujo PRISMA (derivado del pipeline)\n\n"
-            "### Identificación\n"
-            f"- **Registros identificados en bases de datos:** {stats.total_identified} ({db})\n"
-            f"{strategy_lines}"
-            f"- **Duplicados eliminados:** {stats.duplicates_removed}\n"
-            f"- **Registros tras eliminación de duplicados:** {stats.after_dedup}\n\n"
-            "### Cribado y elegibilidad\n"
-            f"- **Registros cribados:** {stats.records_screened}\n"
-            f"- **Registros excluidos en el cribado:** {stats.excluded_screening}\n"
-            f"- **Publicaciones buscadas para su recuperación:** {stats.sought_for_retrieval}\n"
-            f"- **Publicaciones no recuperadas (restricciones de acceso):** {stats.not_retrieved}\n"
-            f"- **Publicaciones evaluadas para elegibilidad:** {stats.assessed_for_eligibility}\n\n"
-            "### Inclusión\n"
-            f"- **Estudios incluidos en conceptos:** {stats.included_in_concepts}\n"
-            f"- **Excluidos (no entran en conceptos):** {stats.excluded_not_in_concepts} "
-            f"(solo emergentes: {stats.excluded_emerging_only}, sin concepto: {stats.excluded_no_concept})\n\n"
-            "> Nota: los motivos de exclusión identificables automáticamente son duplicados entre "
-            "bases de datos y no recuperados por restricciones de acceso. El resto de motivos se "
-            "agrupará a posteriori.\n\n"
-            + self._render_prisma_annex(stats)
-        )
-
-    @staticmethod
-    def _render_prisma_annex(stats: PrismaStats) -> str:
-        """Anexo de apoyo al diagrama PRISMA: lista los papers excluidos y no recuperados."""
-        def _list(items: Tuple[Tuple[str, str], ...]) -> str:
-            if not items:
-                return "Ninguno.\n"
-            lines = []
-            for pid, title in sorted(items):
-                short = re.sub(r"\s+", " ", title)[:90]
-                lines.append(f"- `{pid}` — {short}")
-            return "\n".join(lines)
-
-        return (
-            "#### Anexo: papers no recuperados y excluidos\n\n"
-            f"**No recuperados — restricciones de acceso ({len(stats.not_retrieved_papers)}):**\n"
-            f"{_list(stats.not_retrieved_papers)}\n\n"
-            f"**Solo en conceptos emergentes ({len(stats.excluded_emerging_papers)}):**\n"
-            f"{_list(stats.excluded_emerging_papers)}\n\n"
-            f"**Sin concepto ni emergente ({len(stats.excluded_no_concept_papers)}):**\n"
-            f"{_list(stats.excluded_no_concept_papers)}\n"
         )
 
     def _render_concept_summary(self, cards: Tuple[ConceptCard, ...]) -> str:
@@ -1323,7 +1178,6 @@ class TrainingMaterialsPipeline:
         papers_text: Dict,
         objectives_text: str,
         metadata_lookup: Dict[str, Dict],
-        prisma_raw: Dict,
         output_file: Optional[Path] = None,
         cache_dir: Optional[Path] = None,
         manuscript_evidence: Optional[ManuscriptEvidence] = None,
@@ -1337,7 +1191,6 @@ class TrainingMaterialsPipeline:
             papers_text=papers_text,
             objectives_text=objectives_text,
             metadata_lookup=metadata_lookup,
-            prisma_raw=prisma_raw,
             manuscript_evidence=manuscript_evidence,
         )
 
@@ -1465,57 +1318,18 @@ def processTrainingMaterials() -> Optional[str]:
                 "keywords": p.get("keywords") or canon.get("keywords", []),
             }
 
-    # --- CONTEOS PRISMA brutos derivados del pipeline ---
-    search_counts = {}
-    for db, fname in (("WoS", "wos_search.json"), ("Scopus", "scopus_search.json"),
-                      ("IEEE", "ieee_search.json"), ("PubMed", "pubmed_search.json"),
-                      ("ACM", "acm_search.json"), ("arXiv", "arxiv_search.json")):
-        search_counts[db] = len(_load_optional(output_dir / fname, []))
-    
-    # --- CONTEOS POR ESTRATEGIA DE BÚSQUEDA ---
-    # Contar papers únicos por estrategia de búsqueda desde canonical.json
-    # Un paper puede aparecer en múltiples estrategias (se cuenta en cada una)
-    strategy_counts = {}
-    canonical_for_counts = _load_optional(output_dir / "canonical.json", [])
-    if canonical_for_counts:
-        for paper in canonical_for_counts:
-            strategies = paper.get("query_strategies", [])
-            for s in strategies:
-                strategy_counts[s] = strategy_counts.get(s, 0) + 1
-    
-    canonical = _load_optional(output_dir / "canonical.json", [])
-    selected = _load_optional(output_dir / "selected_acquired.json",
-                              _load_optional(output_dir / "selected_papers.json", []))
-    missing = _load_optional(output_dir / "missing_pdfs.json", [])
-
-    # --- BLACKLIST FILTER ---
+    # --- BLACKLIST FILTER (para evitar que papers blacklisteados aparezcan en el documento) ---
     blacklist = load_blacklist(output_dir)
     if blacklist:
-        # Filtrar papers_text
         before_pt = len(papers_text)
         papers_text = {pid: p for pid, p in papers_text.items() if pid not in blacklist}
         writeLog("info", logger, f"🚫 Blacklist papers_text: {before_pt - len(papers_text)} eliminados")
-        # Filtrar metadata_lookup
         before_ml = len(metadata_lookup)
         metadata_lookup = {pid: m for pid, m in metadata_lookup.items() if pid not in blacklist}
         writeLog("info", logger, f"🚫 Blacklist metadata_lookup: {before_ml - len(metadata_lookup)} eliminados")
-        # Filtrar selected y missing para PRISMA
-        before_sel = len(selected)
-        selected = [p for p in selected if p.get("paper_id") not in blacklist]
-        writeLog("info", logger, f"🚫 Blacklist selected: {before_sel - len(selected)} eliminados")
-        before_mis = len(missing)
-        missing = [m for m in missing if m.get("paper_id") not in blacklist]
-        writeLog("info", logger, f"🚫 Blacklist missing: {before_mis - len(missing)} eliminados")
 
-    prisma_raw = {
-        "db_counts": search_counts,
-        "strategy_counts": strategy_counts,
-        "n_duplicates": max(0, sum(search_counts.values()) - len(canonical)),
-        "n_sought": len(selected),
-        "n_not_retrieved": len(missing),
-        "not_retrieved_papers": [{"paper_id": m.get("paper_id"), "title": m.get("title", "")}
-                                 for m in missing],
-    }
+    # Nota: PRISMA se genera ahora únicamente en prisma.md (completeSelection.py).
+    # training_materials.md ya no duplica esa sección.
 
     # --- CONFIG ---
     config = TrainingConfig.from_file(study_file)
@@ -1582,7 +1396,6 @@ def processTrainingMaterials() -> Optional[str]:
         papers_text=papers_text,
         objectives_text=objectives_text,
         metadata_lookup=metadata_lookup,
-        prisma_raw=prisma_raw,
         output_file=output_dir / "training_materials.md",
         cache_dir=output_dir,
         manuscript_evidence=manuscript_evidence,
