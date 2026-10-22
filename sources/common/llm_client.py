@@ -63,6 +63,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+import signal
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type, TypeVar, Union
@@ -71,6 +72,33 @@ import ollama
 from pydantic import BaseModel, ValidationError
 
 from sources.common.common import logger, writeLog, processControl
+
+
+class LLMTimeoutError(TimeoutError):
+    """Excepción lanzada cuando una llamada al LLM excede el timeout configurado."""
+    pass
+
+
+def _call_with_timeout(func, timeout: float, *args, **kwargs):
+    """
+    Ejecuta `func(*args, **kwargs)` con un timeout usando signal.alarm().
+
+    Solo funciona en Unix/Linux (el entorno de ejecución es Linux).
+    Si `timeout` es 0 o None, se ejecuta sin timeout.
+    """
+    if not timeout or timeout <= 0:
+        return func(*args, **kwargs)
+
+    def _handler(signum, frame):
+        raise LLMTimeoutError(f"LLM call exceeded {timeout}s timeout")
+
+    old_handler = signal.signal(signal.SIGALRM, _handler)
+    signal.setitimer(signal.ITIMER_REAL, timeout)
+    try:
+        return func(*args, **kwargs)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -138,13 +166,16 @@ class OllamaTransport(LLMTransport):
     # Forma B: bloque etiquetado en el campo response
     _THINK_BLOCK = re.compile(r"💭.*?🤔\s*", re.DOTALL | re.IGNORECASE)
 
-    def __init__(self, model: str, suppress_thinking: bool = True) -> None:
+    def __init__(self, model: str, suppress_thinking: bool = True,
+                 timeout: float = 120.0, keep_alive: Any = None) -> None:
         self.model = model
         self.suppress_thinking = suppress_thinking
+        self.timeout = timeout
+        self.keep_alive = keep_alive
         self._use_native_think = suppress_thinking and _SUPPORTS_NATIVE_THINK
         if suppress_thinking and not _SUPPORTS_NATIVE_THINK:
             writeLog("warning", logger,
-                     f"[OllamaTransport:{model}] ollama-python instalado no soporta "
+                     f"[OllamaTransport:{self.model}] ollama-python instalado no soporta "
                      f"el parámetro nativo 'think'. Usando solo el prefijo textual "
                      f"'/no_think' (menos fiable). Actualiza con: pip install --upgrade ollama")
 
@@ -156,14 +187,19 @@ class OllamaTransport(LLMTransport):
         }
         if keep_alive is not None:
             kwargs["keep_alive"] = keep_alive
+        elif self.keep_alive is not None:
+            kwargs["keep_alive"] = self.keep_alive
         effective_system = self._build_system(system)
         if effective_system:
             kwargs["system"] = effective_system
         if self._use_native_think:
             kwargs["think"] = False
 
+        def _generate():
+            return ollama.generate(**kwargs)
+
         try:
-            response = ollama.generate(**kwargs)
+            response = _call_with_timeout(_generate, self.timeout)
         except TypeError as exc:
             # Salvaguarda: si la detección de firma falló (p.ej. wrapper/mock
             # que no expone la firma real) y el server/cliente realmente no
@@ -174,7 +210,7 @@ class OllamaTransport(LLMTransport):
                          f"[OllamaTransport:{self.model}] 'think' rechazado en runtime "
                          f"({exc}); reintentando sin él.")
                 kwargs.pop("think")
-                response = ollama.generate(**kwargs)
+                response = _call_with_timeout(_generate, self.timeout)
             else:
                 raise
 
@@ -593,6 +629,8 @@ def create_ollama_client(
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
     suppress_thinking: bool = True,
+    timeout: Optional[float] = None,
+    keep_alive: Any = None,
 ) -> LLMClient:
     """
     Factory estándar para obtener un LLMClient configurado sobre Ollama.
@@ -604,9 +642,12 @@ def create_ollama_client(
     retries = max_retries if max_retries is not None else defaults.get("max_retries", 2)
     temp = temperature if temperature is not None else defaults.get("temperature", 0.0)
     tokens = max_tokens if max_tokens is not None else defaults.get("max_tokens", 1200)
+    timeout_val = timeout if timeout is not None else defaults.get("llm_timeout", 120.0)
+    keep_alive_val = keep_alive if keep_alive is not None else defaults.get("llm_keep_alive", None)
 
     return LLMClient(
-        transport=OllamaTransport(model=m_model, suppress_thinking=suppress_thinking),
+        transport=OllamaTransport(model=m_model, suppress_thinking=suppress_thinking,
+                                  timeout=timeout_val, keep_alive=keep_alive_val),
         config=LLMClientConfig(temperature=temp, max_tokens=tokens),
         retry_policy=RetryPolicy(max_retries=retries),
     )
@@ -619,6 +660,8 @@ def create_resilient_ollama_client(
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
     suppress_thinking: bool = True,
+    timeout: Optional[float] = None,
+    keep_alive: Any = None,
 ) -> LLMClient:
     """
     Factory recomendada para pipelines automáticos.
@@ -638,6 +681,8 @@ def create_resilient_ollama_client(
     retries = max_retries if max_retries is not None else defaults.get("max_retries", 1)
     temp = temperature if temperature is not None else defaults.get("temperature", 0.3)
     tokens = max_tokens if max_tokens is not None else defaults.get("max_tokens", 800)
+    timeout_val = timeout if timeout is not None else defaults.get("llm_timeout", 120.0)
+    keep_alive_val = keep_alive if keep_alive is not None else defaults.get("llm_keep_alive", None)
 
     transports: List[LLMTransport] = []
 
@@ -653,14 +698,17 @@ def create_resilient_ollama_client(
         ConfigurableOllamaTransport(
             model=p_model,
             default_options=primary_options,
-            suppress_thinking=suppress_thinking
+            suppress_thinking=suppress_thinking,
+            timeout=timeout_val,
+            keep_alive=keep_alive_val,
         )
     )
 
     # 2. Añadir los modelos de fallback (usan los tokens estándar)
     for fb_model in fb_models:
         transports.append(
-            OllamaTransport(model=fb_model, suppress_thinking=suppress_thinking)
+            OllamaTransport(model=fb_model, suppress_thinking=suppress_thinking,
+                            timeout=timeout_val, keep_alive=keep_alive_val)
         )
 
     # 3. Crear el cliente usando el FallbackTransport

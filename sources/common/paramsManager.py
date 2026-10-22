@@ -37,6 +37,11 @@ def manageArgs():
                              "'server': ejecutar solo la parte no interactiva en servidor GPU "
                              "(pasos 8-21: zoning hasta exportación Gemini Notebook). "
                              "Si no se indica, se ejecuta el pipeline completo en local.")
+    parser.add_argument('--step', type=str, default=None,
+                        help="Nombre del paso desde el cual iniciar el pipeline (ej. TechnicalAnnex, "
+                             "DiscoveryEngine, StructureExtraction). Si se indica, se salta directamente "
+                             "a ese paso y se continúa hasta el final. Si no se indica, se ejecuta "
+                             "normalmente (o según --serverGPU).")
 
     args = parser.parse_args()
     return args

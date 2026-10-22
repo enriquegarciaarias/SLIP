@@ -359,6 +359,29 @@ def processRankingEngine():
                  f"[RankingEngine] Papers manuales excluidos del ranking: {removed} "
                  f"(no ocupan cupo de top_k={TOP_K}), quedan {len(papers)}")
 
+    # --- PAPER BLACKLIST POR BAJO CONTENIDO DE TEXTO ---
+    # Los papers cuyo paper_id aparezca en paper_blacklist.ids de config.json
+    # se excluyen antes del ranking para no ocupar cupo de top_k.
+    # Esta blacklist se alimenta automáticamente desde corpusCleaning
+    # (papers con <500 palabras tras limpieza se guardan en low_text_papers.json
+    # y el operador puede añadirlos manualmente a config.json).
+    defaults = getattr(processControl, "defaults", None) or {}
+    paper_bl_cfg = defaults.get("paper_blacklist", {}) if isinstance(defaults, dict) else {}
+    paper_blacklist_ids = set(paper_bl_cfg.get("ids", []) or [])
+    paper_bl_reason = paper_bl_cfg.get("reason", "")
+    if paper_blacklist_ids:
+        before = len(papers)
+        papers = [p for p in papers if p.get("paper_id") not in paper_blacklist_ids]
+        removed = before - len(papers)
+        writeLog("info", logger,
+                 f"[RankingEngine] Papers excluidos por paper_blacklist: {removed} "
+                 f"(bajo contenido de texto u otro motivo), quedan {len(papers)}")
+        if removed:
+            writeLog("info", logger,
+                     f"[RankingEngine] paper_blacklist reason: {paper_bl_reason}")
+            writeLog("info", logger,
+                     f"[RankingEngine] IDs blacklisteados: {sorted(paper_blacklist_ids)}")
+
     study_query = build_query_from_study_description(study_desc)
     if not study_query.strip():
         writeLog("error", logger,

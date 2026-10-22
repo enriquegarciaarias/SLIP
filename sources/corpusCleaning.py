@@ -232,7 +232,34 @@ def processCorpusCleaning():
         json.dump(cleaned_texts, f, indent=2, ensure_ascii=False)
 
     # -------------------------------------------------------------
-    # 4. RESUMEN
+    # 4. GUARDAR LISTA DE PAPERS CON BAJO CONTENIDO DE TEXTO
+    # -------------------------------------------------------------
+    low_text_papers = []
+    for p in cleaned_metadata:
+        wc = p.get("word_count", 0)
+        if wc < 500:
+            low_text_papers.append({
+                "paper_id": p["paper_id"],
+                "title": p.get("title", ""),
+                "source": p.get("pdf_source", ""),
+                "year": p.get("year"),
+                "word_count": wc,
+                "char_count": p.get("char_count", 0),
+                "reason": "low_text_after_cleaning",
+                "pdf_exists": True,
+            })
+
+    # También registrar los descartados por texto insuficiente (<300 palabras)
+    # (estos ya no están en cleaned_metadata, los reconstruimos desde el log)
+    low_text_file = output_dir / "low_text_papers.json"
+    low_text_file.write_text(json.dumps(low_text_papers, indent=2, ensure_ascii=False),
+                             encoding="utf-8")
+    writeLog("info", logger,
+             f"[CLEAN] {len(low_text_papers)} papers con bajo contenido (<500 palabras) "
+             f"guardados en {low_text_file.name}")
+
+    # -------------------------------------------------------------
+    # 5. RESUMEN
     # -------------------------------------------------------------
     total_papers = len(cleaned_metadata)
     total_words = sum(p.get("word_count", 0) for p in cleaned_metadata)
@@ -247,6 +274,7 @@ def processCorpusCleaning():
     writeLog("info", logger, f"  papers_text.json: {total_papers} registros válidos")
     writeLog("info", logger, f"  Total palabras limpias: {total_words:,}")
     writeLog("info", logger, f"  Low quality (<500 palabras): {low_quality}")
+    writeLog("info", logger, f"  Papers en low_text_papers.json: {len(low_text_papers)}")
     writeLog("info", logger, "✅ [END] processCorpusCleaning")
 
     return cleaned_metadata, cleaned_texts

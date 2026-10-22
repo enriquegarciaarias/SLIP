@@ -175,6 +175,11 @@
         "_help": "Opcional. Dominios/URLs de sitios desde los que NO se pueden descargar PDFs (aplica a todas las investigaciones). Los papers cuyo landing_page/pdf_url coincida con estos dominios se excluyen ANTES del ranking para no ocupar cupo de top_k. Ejemplo: {\"urls\": [\"iopscience.iop.org\"], \"domains\": [\"springer.com\", \"elsevier.com\"]}",
         "urls": [],
         "domains": []
+      },
+      "paper_blacklist": {
+        "_help": "Opcional. IDs de papers a excluir del ranking antes de aplicar top_k. Se alimenta automáticamente desde corpusCleaning (papers con <500 palabras tras limpieza se guardan en low_text_papers.json). El operador puede añadir IDs manualmente aquí para futuras ejecuciones. Ejemplo: {\"ids\": [\"wos_42\", \"scopus_74\"], \"reason\": \"PDFs escaneados, sin texto extraíble\"}",
+        "ids": [],
+        "reason": ""
       }
     },
     "environment": {

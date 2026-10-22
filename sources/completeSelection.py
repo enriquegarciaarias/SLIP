@@ -141,7 +141,10 @@ def _build_prisma_md(output_dir: Path, input_dir: Path,
                      selected_count: int,
                      copied_count: int,
                      not_found_count: int,
-                     selected_papers: list[dict] | None = None) -> str:
+                     selected_papers: list[dict] | None = None,
+                     low_text_papers: list[dict] | None = None,
+                     paper_blacklist_ids: list[str] | None = None,
+                     paper_blacklist_reason: str = "") -> str:
     """
     Construye el contenido del archivo prisma.md con todas las estadísticas
     del proceso de selección PRISMA.
@@ -564,6 +567,58 @@ def _build_prisma_md(output_dir: Path, input_dir: Path,
     lines.append("")
 
     # ------------------------------------------------------------------
+    # 6.6. Papers con bajo contenido de texto (excluidos del corpus útil)
+    # ------------------------------------------------------------------
+    low_text_papers = low_text_papers or []
+    paper_blacklist_ids = paper_blacklist_ids or []
+
+    lines.append("## 6.6. Papers con bajo contenido de texto extraído")
+    lines.append("")
+    lines.append(
+        "Estos papers tienen su PDF descargado pero, tras la extracción y limpieza "
+        "de texto en `corpusCleaning`, contienen menos de 500 palabras. Esto suele "
+        "indicar PDFs escaneados (sin capa de texto), con columnas de dos columnas "
+        "que el extractor no maneja, o con protección/restricciones. Se recomienda "
+        "revisarlos manualmente o añadirlos a `paper_blacklist` en `config.json`."
+    )
+    lines.append("")
+    lines.append(f"- Total de papers con bajo contenido: {len(low_text_papers)}")
+    lines.append("")
+
+    if low_text_papers:
+        lines.append("### 6.6.1. Lista de papers con bajo contenido")
+        lines.append("")
+        lines.append("| Paper ID | Palabras | Caracteres | Título |")
+        lines.append("|----------|----------|------------|--------|")
+        for p in low_text_papers[:50]:
+            pid = p.get("paper_id", "?")
+            wc = p.get("word_count", 0)
+            cc = p.get("char_count", 0)
+            title = (p.get("title", "") or "SIN TÍTULO")[:60]
+            lines.append(f"| {pid} | {wc} | {cc} | {title} |")
+        if len(low_text_papers) > 50:
+            lines.append(f"| ... | ... | ... | (y {len(low_text_papers) - 50} más) |")
+        lines.append("")
+
+    if paper_blacklist_ids:
+        lines.append("### 6.6.2. Blacklist de papers excluidos del ranking")
+        lines.append("")
+        lines.append(
+            f"Motivo: {paper_blacklist_reason or 'bajo contenido de texto detectado en corpusCleaning'}"
+        )
+        lines.append("")
+        lines.append("| Paper ID |")
+        lines.append("|----------|")
+        for pid in sorted(paper_blacklist_ids):
+            lines.append(f"| {pid} |")
+        lines.append("")
+        lines.append(
+            "Nota: estos papers se excluyen automáticamente antes del ranking en "
+            "ejecuciones futuras para no ocupar cupo de `top_k`."
+        )
+    lines.append("")
+
+    # ------------------------------------------------------------------
     # 7. Flujo PRISMA resumido (formato clásico)
     # ------------------------------------------------------------------
     lines.append("## 7. Flujo PRISMA resumido")
@@ -639,6 +694,18 @@ def processCompleteSelection() -> Optional[Path]:
     search_cfg = search_config.get("search", {}) if isinstance(search_config, dict) else {}
     availables = search_cfg.get("availables", [])
 
+    # --- LEER LOW_TEXT_PAPERS (generado por corpusCleaning) ---
+    low_text_papers_file = output_dir / "low_text_papers.json"
+    low_text_papers = _load_json(low_text_papers_file)
+    if not isinstance(low_text_papers, list):
+        low_text_papers = []
+
+    # --- LEER PAPER_BLACKLIST de config.json ---
+    defaults = getattr(processControl, "defaults", None) or {}
+    paper_bl_cfg = defaults.get("paper_blacklist", {}) if isinstance(defaults, dict) else {}
+    paper_blacklist_ids = list(paper_bl_cfg.get("ids", []) or [])
+    paper_blacklist_reason = paper_bl_cfg.get("reason", "")
+
     # ------------------------------------------------------------------
     # 1. Copiar PDFs (funcionalidad original de copySelectedPapers)
     # ------------------------------------------------------------------
@@ -703,6 +770,9 @@ def processCompleteSelection() -> Optional[Path]:
         copied_count=len(copied),
         not_found_count=len(not_found),
         selected_papers=selected,
+        low_text_papers=low_text_papers,
+        paper_blacklist_ids=paper_blacklist_ids,
+        paper_blacklist_reason=paper_blacklist_reason,
     )
 
     prisma_path = output_dir / "prisma.md"
