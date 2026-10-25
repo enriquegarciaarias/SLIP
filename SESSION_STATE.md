@@ -898,3 +898,28 @@ Para desactivar completamente: `"emergente": 0`.
 **Estado del pipeline:** Sin cambios funcionales; solo se eliminó el auto-reinicio y se movió configuración. Los pasos 1-6 de SensoresACL siguen completados hasta `completeSelection`.
 
 **Si cambiaste estructura, módulos, config o flujos:** `AGENTS.md` y `SESSION_STATE.md` actualizados.
+
+---
+
+### Sesión cerrada — 2026-10-25
+
+**Qué se hizo:**
+1. **Cambiado `primary_model` de Ollama en `config.json`:**
+   - `primary_model`: `qwen2.5:14b` → `qwen3:14b`
+   - `fallback_model`: añadido `qwen2.5:14b` como primer fallback, seguido de `qwen3:8b`, `qwen2.5:7b`, `llama3.1:8b`
+2. **Añadidos iconos visuales a `writeLog()` en `sources/common/common.py`:**
+   - `WARNING` → `⚠️  <mensaje>`
+   - `ERROR` → `❌  <mensaje>`
+   - Otros niveles → sin cambios
+   - Razón: facilitar la lectura de errores y advertencias en ficheros `sbatch out` del servidor, donde no hay colores de terminal.
+3. **Commit exitoso:** `77d31e0` con 35 archivos cambiados, incluyendo reparación de objetos git corruptos (`pdfIndex.py`, `ieee_provider.py`, `openalex_provider.py`, `scopus_provider.py`, `manuscriptEvidence.py`, `tests/test_enrichment.py`).
+
+**Cambios en estructura de directorios, módulos, configuración o flujos:**
+- `config.json` (raíz): sección `defaults.llm` actualizada
+- `sources/common/common.py`: función `writeLog` modificada
+- `AGENTS.md`: tabla de configuración LLM actualizada; nueva sección "Iconos en writeLog para logs sin color"
+- `SESSION_STATE.md`: esta entrada
+
+**Estado del pipeline:** Sin cambios funcionales; solo cambio de modelo LLM y mejora de legibilidad de logs.
+
+**Si cambiaste estructura, módulos, config o flujos:** `AGENTS.md` y `SESSION_STATE.md` actualizados.

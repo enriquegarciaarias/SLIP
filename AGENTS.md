@@ -98,7 +98,7 @@ Secciones clave de `defaults`:
 | `search.availables` / `search.providers.<fuente>` | fuentes activas (`wos`, `scopus`, `ieee`, `pubmed`, `openalex`, `arxiv`, `scholar`, `acl_anthology`) y modo `api`/`file` + credenciales. IEEE configurado en modo `"api"` con API key propia. ACL Anthology usa la librería `acl_anthology` (repositorio git local) y se configura en `search.providers.acl_anthology` con `mode: "api"`, `min_year` y `max_results`. |
 | `search.decomposition.enabled` | además de la query global, lanza una consulta por pregunta de investigación |
 | `search.merge.by_title_only_min_chars` | dedup por título sin año |
-| `llm.primary_model` / `llm.fallback_model` | modelos Ollama (qwen3:8b, qwen2.5:7b, llama3.1:8b) |
+| `llm.primary_model` / `llm.fallback_model` | modelos Ollama (primary: qwen3:14b; fallbacks: qwen2.5:14b, qwen3:8b, qwen2.5:7b, llama3.1:8b) |
 | `conceptEvidence.*` | `section_weights`, `genericity_penalty`, `genericity_topk`, `generic_threshold`, `consensus_enabled`, `consensus_cluster_threshold`, `zone_weights.*` |
 | `url_blacklist` (en `config.json` global) | `urls` / `domains` (dominios de sitios inaccesibles, ej. `iopscience.iop.org`). Aplica a **todas** las investigaciones. Los papers con `landing_page`/`pdf_url` que coincidan se excluyen **antes del ranking** para no ocupar cupo de `top_k`. |
 | `blacklist.*` (en `personalizacion.json` por subject) | `ids` (paper_ids a excluir), `urls` / `domains` (override adicional por subject). |
@@ -169,6 +169,18 @@ Cada subject tiene su propio `results/input/{subject}/config.json` que hace **me
    **Regla del checkpoint:** solo se reutiliza si las condiciones de entrada son idénticas (mismo conjunto de `paper_ids` en `ranked_papers.json`, mismo orden). Si el ranking cambió (nuevas estrategias, nuevas queries, diferentes papers), el checkpoint se descarta automáticamente y la selección empieza desde cero. Esto evita arrastrar decisiones de una ejecución anterior sobre un conjunto diferente de papers.
 2. **Ingestión manual** (`manualIngestion`): PDFs semilla en `manual_papers/` se integran en `selected_papers.json`.
 3. **Descarga de PDFs** (`adquisitionEngine`): si falla una descarga, interfaz de recuperación manual. El usuario deja el PDF en `results/output/{subject}/pdfs/manual/`. Los PDFs se archivan en `_pdf_vault/`.
+
+---
+
+## 7. Iconos en writeLog para logs sin color
+
+La función `writeLog()` en `sources/common/common.py` prepende iconos visuales a los mensajes según el nivel:
+
+- `WARNING` → `⚠️  <mensaje>`
+- `ERROR` → `❌  <mensaje>`
+- Otros niveles → sin cambios
+
+Esto facilita la lectura en ficheros `sbatch out` del servidor donde no hay colores de terminal.
 
 ---
 
