@@ -692,7 +692,7 @@ def create_resilient_ollama_client(
         # Le damos 2.5x más espacio para que piense y aún le queden tokens para responder
         primary_options["num_predict"] = max(2000, int(tokens * 2.5))
         writeLog("info", logger,
-                 f"[Factory] Qwen3 detected: bumping num_predict to {primary_options['num_predict']}")
+                 f"[Factory] Qwen3 model '{p_model}' detected: bumping num_predict to {primary_options['num_predict']}")
 
     transports.append(
         ConfigurableOllamaTransport(
