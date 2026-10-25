@@ -923,3 +923,35 @@ Para desactivar completamente: `"emergente": 0`.
 **Estado del pipeline:** Sin cambios funcionales; solo cambio de modelo LLM y mejora de legibilidad de logs.
 
 **Si cambiaste estructura, módulos, config o flujos:** `AGENTS.md` y `SESSION_STATE.md` actualizados.
+
+---
+
+### Sesión cerrada — 2026-10-25 (cierre de sesión)
+
+**Qué salió bien:**
+1. **Push exitoso a `origin/main`:** Confirmado por PyCharm con `"Your branch is up to date with 'origin/main'"`. Todos los commits están subidos al remoto.
+2. **Reparación de objetos git corruptos:** Se recuperaron `sources/common/pdfIndex.py`, `sources/ingestion/ieee_provider.py`, `sources/ingestion/openalex_provider.py`, `sources/ingestion/scopus_provider.py`, `sources/manuscriptEvidence.py` y `tests/test_enrichment.py` mediante `git hash-object -w`.
+3. **Cambio de modelo LLM principal:** `primary_model` pasado de `qwen2.5:14b` a `qwen3:14b` en `config.json`; `qwen2.5:14b` añadido como primer fallback.
+4. **Iconos en `writeLog()`:** `sources/common/common.py` ahora prepende `⚠️` para WARNING y `❌` para ERROR, mejorando la legibilidad en `sbatch out` sin colores.
+5. **Identificación exacta del modelo Qwen3:** `sources/common/llm_client.py` ahora loguea el nombre exacto del modelo (`qwen3:14b`) en lugar del genérico "Qwen3 detected".
+
+**Qué falló:**
+1. **Push inicial falló por falta de credenciales:** `git push origin main` falló con `could not read Username for 'https://github.com'`. Se resolvió haciendo commit y push desde PyCharm.
+2. **Commits bloqueados por objetos git corruptos:** Varios `git commit` fallaron con `invalid object ... Error building trees`. Se repararon reconstruyendo los objetos desde los archivos en disco.
+
+**Próximos pasos:**
+1. Ejecutar el pipeline completo desde `corpusCleaning` en adelante para el subject `SensoresACL` (pasos 7-21 aún no ejecutados en esta sesión).
+2. Verificar que `venue_from_doi` se propaga correctamente en `papers_metadata.json` y `papers_text.json` tras `corpusCleaning`.
+3. Considerar ajustar parámetros de `fineTuning` en `results/input/SensoresACL/config.json` (`batch_size`, `epochs`, `max_pairs`) si se dispone de más capacidad de CPU.
+4. Añadir tests unitarios para `AclAnthologyProvider` y `_venue_from_doi`.
+
+**Cambios en estructura de directorios, módulos, configuración o flujos:**
+- `config.json` (raíz): sección `defaults.llm` actualizada (primary_model qwen3:14b, fallbacks ajustados)
+- `sources/common/common.py`: función `writeLog` modificada con iconos visuales
+- `sources/common/llm_client.py`: mensaje de detección Qwen3 ahora incluye el nombre exacto del modelo
+- `AGENTS.md`: tabla de configuración LLM actualizada; nueva sección "Iconos en writeLog para logs sin color"
+- `SESSION_STATE.md`: esta entrada
+
+**Estado del pipeline:** Sin cambios funcionales en el orden de ejecución ni en los módulos. Los pasos 1-6 de SensoresACL siguen completados hasta `completeSelection`. Los pasos 7-21 permanecen pendientes.
+
+**Si cambiaste estructura, módulos, config o flujos:** `AGENTS.md` y `SESSION_STATE.md` actualizados.
