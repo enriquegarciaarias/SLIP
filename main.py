@@ -197,6 +197,7 @@ def mainProcess():
 def customProcess():
     from sources.complementos.migracionInventory import processMigracionInventory
     processMigracionInventory()
+    return
 
 
 if __name__ == '__main__':
