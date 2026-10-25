@@ -240,6 +240,77 @@ def _load_manual_global_ids(input_dir: Path) -> set[str]:
     return ids
 
 
+def _load_paper_blacklist(input_dir: Path, output_dir: Path) -> dict[str, dict]:
+    """
+    Consolida todas las fuentes de paper_blacklist en un único dict:
+      paper_id -> {"reason": str, "detail": str}
+
+    Fuentes (en orden de prioridad):
+      1. config.json > defaults.paper_blacklist.entries (configuración manual/automática)
+      2. rejected_papers.json (rechazos del operador durante selección interactiva)
+      3. low_text_papers.json (papers con <500 palabras tras limpieza en corpusCleaning)
+
+    Retorna un dict indexado por paper_id.
+    """
+    blacklist: dict[str, dict] = {}
+
+    # 1) Desde config.json
+    defaults = getattr(processControl, "defaults", None) or {}
+    paper_bl_cfg = defaults.get("paper_blacklist", {}) if isinstance(defaults, dict) else {}
+    for entry in paper_bl_cfg.get("entries", []) or []:
+        pid = entry.get("id")
+        if pid:
+            blacklist[pid] = {
+                "reason": entry.get("reason", "unknown"),
+                "detail": entry.get("detail", ""),
+                "source": "config.json",
+            }
+
+    # 2) Desde rejected_papers.json (operador dijo "N")
+    rejected_file = output_dir / "rejected_papers.json"
+    if rejected_file.exists():
+        try:
+            with open(rejected_file, "r", encoding="utf-8") as f:
+                rejected = json.load(f)
+            if isinstance(rejected, list):
+                for entry in rejected:
+                    pid = entry.get("paper_id")
+                    gid = entry.get("global_id") or ""
+                    info = {
+                        "reason": entry.get("reason", "operator_rejected"),
+                        "detail": entry.get("detail", ""),
+                        "source": "operator_rejection",
+                    }
+                    if pid:
+                        blacklist[pid] = info
+                    if gid:
+                        blacklist[gid] = info
+        except Exception as exc:
+            writeLog("warning", logger,
+                     f"[RankingEngine] No se pudo leer rejected_papers.json: {exc}")
+
+    # 3) Desde low_text_papers.json (bajo contenido de texto)
+    low_text_file = output_dir / "low_text_papers.json"
+    if low_text_file.exists():
+        try:
+            with open(low_text_file, "r", encoding="utf-8") as f:
+                low_text = json.load(f)
+            if isinstance(low_text, list):
+                for entry in low_text:
+                    pid = entry.get("paper_id")
+                    if pid:
+                        blacklist[pid] = {
+                            "reason": entry.get("reason", "low_text"),
+                            "detail": entry.get("detail", ""),
+                            "source": "corpusCleaning",
+                        }
+        except Exception as exc:
+            writeLog("warning", logger,
+                     f"[RankingEngine] No se pudo leer low_text_papers.json: {exc}")
+
+    return blacklist
+
+
 def _stream_ranking_query(stream: dict, study_query: str) -> str:
     """Query de embedding para rankear un flujo: ranking_query > query > estudio."""
     return (stream.get("ranking_query") or stream.get("query") or study_query).strip()
@@ -359,28 +430,32 @@ def processRankingEngine():
                  f"[RankingEngine] Papers manuales excluidos del ranking: {removed} "
                  f"(no ocupan cupo de top_k={TOP_K}), quedan {len(papers)}")
 
-    # --- PAPER BLACKLIST POR BAJO CONTENIDO DE TEXTO ---
-    # Los papers cuyo paper_id aparezca en paper_blacklist.ids de config.json
-    # se excluyen antes del ranking para no ocupar cupo de top_k.
-    # Esta blacklist se alimenta automáticamente desde corpusCleaning
-    # (papers con <500 palabras tras limpieza se guardan en low_text_papers.json
-    # y el operador puede añadirlos manualmente a config.json).
-    defaults = getattr(processControl, "defaults", None) or {}
-    paper_bl_cfg = defaults.get("paper_blacklist", {}) if isinstance(defaults, dict) else {}
-    paper_blacklist_ids = set(paper_bl_cfg.get("ids", []) or [])
-    paper_bl_reason = paper_bl_cfg.get("reason", "")
-    if paper_blacklist_ids:
+    # --- PAPER BLACKLIST CONSOLIDADA ANTES DEL RANKING ---
+    # Combina: config.json entries + rechazos del operador + bajo contenido de texto.
+    # Los papers blacklisteados se excluyen antes del scoring para no ocupar
+    # cupo de top_k. Se filtra tanto por paper_id como por global_id (estable).
+    paper_blacklist = _load_paper_blacklist(input_dir, output_dir)
+    if paper_blacklist:
         before = len(papers)
-        papers = [p for p in papers if p.get("paper_id") not in paper_blacklist_ids]
+        papers = [p for p in papers
+                  if p.get("paper_id") not in paper_blacklist
+                  and p.get("global_id") not in paper_blacklist]
         removed = before - len(papers)
         writeLog("info", logger,
                  f"[RankingEngine] Papers excluidos por paper_blacklist: {removed} "
-                 f"(bajo contenido de texto u otro motivo), quedan {len(papers)}")
+                 f"(no ocupan cupo de top_k={TOP_K}), quedan {len(papers)}")
         if removed:
-            writeLog("info", logger,
-                     f"[RankingEngine] paper_blacklist reason: {paper_bl_reason}")
-            writeLog("info", logger,
-                     f"[RankingEngine] IDs blacklisteados: {sorted(paper_blacklist_ids)}")
+            # Contar por motivo para el log
+            reason_counts: dict[str, int] = {}
+            remaining_pids = {p.get("paper_id") for p in papers}
+            remaining_gids = {p.get("global_id") for p in papers if p.get("global_id")}
+            for key, info in paper_blacklist.items():
+                if key not in remaining_pids and key not in remaining_gids:
+                    r = info.get("reason", "unknown")
+                    reason_counts[r] = reason_counts.get(r, 0) + 1
+            for reason, count in reason_counts.items():
+                writeLog("info", logger,
+                         f"[RankingEngine]   - {reason}: {count} paper(es)")
 
     study_query = build_query_from_study_description(study_desc)
     if not study_query.strip():

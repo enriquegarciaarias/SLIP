@@ -55,6 +55,15 @@ RE_SECTION_HEADER = re.compile(
     r"^\s*(?:references|bibliography|acknowledgments?|funding|acknowledgements?)\s*$",
     re.IGNORECASE | re.MULTILINE
 )
+
+# Secciones del cuerpo del paper que indican contenido válido. Si encontramos
+# una de estas al buscar desde el final, sabemos que todo lo que venga después
+# es cola (referencias, agradecimientos, financiación) y cualquier encabezado
+# de cola anterior a esta posición es un falso positivo (pie de página, etc.).
+RE_SECTION_BODY = re.compile(
+    r"^\s*(?:abstract|introduction|methodology|methods|results|conclusion|conclusions|discussion|materials and methods|approach)\s*$",
+    re.IGNORECASE | re.MULTILINE
+)
 RE_MULTISPACE = re.compile(r"\s+")
 RE_PUNCTUATION_SPACE = re.compile(r"\s+([.,;:!?])")
 RE_PAGE_NUMBER = re.compile(r"^\d+$")
@@ -71,11 +80,23 @@ def clean_text_corpus(text: str) -> str:
     text = RE_HYPHEN_SPACE.sub(r"\1\2", text)
     text = text.replace("\r", "\n")
 
-    # Cortar a partir de referencias/bibliografía para no contaminar el corpus
-    cut_pos = len(text)
-    for m in RE_SECTION_HEADER.finditer(text):
-        cut_pos = min(cut_pos, m.start())
-    text = text[:cut_pos]
+    # Cortar a partir de referencias/bibliografía para no contaminar el corpus.
+    # Estrategia: buscar desde el final hasta encontrar la última sección del
+    # cuerpo (abstract, introduction, methodology, results, conclusion…).
+    # Cualquier encabezado de cola (references, bibliography, funding…) que
+    # aparezca DESPUÉS de esa sección del cuerpo es legítimo para cortar.
+    # Cualquier encabezado de cola ANTES de ella es un falso positivo
+    # (pie de página, encabezado de sección, mención inline) y se ignora.
+    body_matches = list(RE_SECTION_BODY.finditer(text))
+    if body_matches:
+        last_body_pos = body_matches[-1].start()
+        tail_matches = list(RE_SECTION_HEADER.finditer(text))
+        cut_pos = len(text)
+        for m in tail_matches:
+            if m.start() > last_body_pos:
+                cut_pos = m.start()
+                break
+        text = text[:cut_pos]
 
     # Segundo corte robusto: encabezados de bibliografía inline (el texto
     # puede venir sin saltos de línea tras la extracción del PDF).

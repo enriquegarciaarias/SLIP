@@ -460,6 +460,33 @@ def save_selected(selected: list, output_dir: Path) -> Path:
     return file
 
 
+def save_rejected_papers(rejected: list, output_dir: Path) -> Path:
+    """
+    Guarda los papers rechazados por el operador con motivo 'operator_rejected'
+    para que puedan añadirse a la paper_blacklist en futuras ejecuciones.
+    """
+    file = output_dir / "rejected_papers.json"
+    rejected_entries = []
+    for p in rejected:
+        gid = p.get("global_id")
+        entry = {
+            "paper_id": p.get("paper_id", "unknown"),
+            "global_id": gid if gid else "",
+            "title": p.get("title", ""),
+            "reason": "operator_rejected",
+            "detail": "El operador indicó 'N' (rechazar) durante la selección interactiva",
+            "source": p.get("source", ""),
+            "year": p.get("year"),
+        }
+        rejected_entries.append(entry)
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(rejected_entries, f, indent=2, ensure_ascii=False)
+    writeLog("info", logger,
+             f"[Enrichment] {len(rejected_entries)} papers rechazados por el operador "
+             f"guardados en {file.name}")
+    return file
+
+
 # --------------------------------------------------
 # ENTRY POINT
 # --------------------------------------------------
@@ -504,14 +531,20 @@ def processEnrichmentEngine():
         # 5. Guardar selected_papers.json
         selected_file = save_selected(selected, output_dir)
 
+        # 6. Guardar rejected_papers.json (para paper_blacklist en futuras ejecuciones)
+        rejected_file = save_rejected_papers(rejected, output_dir)
+
         writeLog("info", logger, f"[Enrichment] Selected: {len(selected)} papers")
         writeLog("info", logger, f"[Enrichment] Rejected: {len(rejected)} papers")
         writeLog("info", logger, f"[Enrichment] Saved to {selected_file}")
+        writeLog("info", logger, f"[Enrichment] Saved to {rejected_file}")
         writeLog("info", logger, "✅ [END] processEnrichmentEngine")
 
         return {
             "selected": str(selected_file),
+            "rejected": str(rejected_file),
             "total_selected": len(selected),
+            "total_rejected": len(rejected),
         }
     except Exception as e:
         writeLog("error", logger, f"Error in processEnrichmentEngine: {e}")

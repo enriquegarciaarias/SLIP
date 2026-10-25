@@ -21,3 +21,6 @@ out/
 
 # Configuración local
 config.json
+
+# Repositorios de terceros clonados (no versionar en el proyecto)
+sources/third_party/

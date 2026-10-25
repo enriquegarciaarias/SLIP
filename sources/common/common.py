@@ -146,6 +146,12 @@ def writeLog(level: str, logger: logging.Logger, message: str):
         logger.error(f"Invalid log level '{level}'")
         return
 
+    # Añadir iconos visuales para niveles críticos en logs sin color (sbatch out)
+    if level == "warning":
+        message = f"⚠️  {message}"
+    elif level == "error":
+        message = f"❌  {message}"
+
     getattr(logger, level)(message)
 
 

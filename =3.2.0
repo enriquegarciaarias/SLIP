@@ -1,0 +1,97 @@
+Collecting acl-anthology==1.3.4
+  Using cached acl_anthology-1.3.4-py3-none-any.whl.metadata (6.0 kB)
+Collecting gitpython
+  Downloading gitpython-3.2.1-py3-none-any.whl.metadata (13 kB)
+Collecting lxml<7.0.0,>=6.1.0 (from acl-anthology==1.3.4)
+  Using cached lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.3 kB)
+Requirement already satisfied: pyyaml~=6.0 in ./.venv/lib/python3.12/site-packages (from acl-anthology==1.3.4) (6.0.3)
+Requirement already satisfied: rich>=13.3.5 in ./.venv/lib/python3.12/site-packages (from acl-anthology==1.3.4) (15.0.0)
+Requirement already satisfied: attrs in ./.venv/lib/python3.12/site-packages (from acl-anthology==1.3.4) (26.1.0)
+Collecting texsoup<0.4.0,>=0.3.1 (from acl-anthology==1.3.4)
+  Using cached texsoup-0.3.3-py3-none-any.whl.metadata (3.8 kB)
+Collecting omegaconf~=2.3.0 (from acl-anthology==1.3.4)
+  Using cached omegaconf-2.3.1-py3-none-any.whl.metadata (4.5 kB)
+Collecting python-slugify~=9.1.3 (from python-slugify[unidecode]~=9.1.3->acl-anthology==1.3.4)
+  Using cached python_slugify-9.1.3-py3-none-any.whl.metadata (12 kB)
+Requirement already satisfied: numpy>=1.26.0 in ./.venv/lib/python3.12/site-packages (from acl-anthology==1.3.4) (2.4.6)
+Collecting platformdirs (from acl-anthology==1.3.4)
+  Using cached platformdirs-4.13.5-py3-none-any.whl.metadata (5.5 kB)
+Collecting rnc2rng>=2.6.6 (from acl-anthology==1.3.4)
+  Downloading rnc2rng-2.7.0-py3-none-any.whl.metadata (2.9 kB)
+Collecting citeproc-py~=0.11.1 (from acl-anthology==1.3.4)
+  Downloading citeproc_py-0.11.1-py3-none-any.whl.metadata (19 kB)
+Collecting langcodes>=3.5.1 (from langcodes[data]>=3.5.1->acl-anthology==1.3.4)
+  Downloading langcodes-3.5.1-py3-none-any.whl.metadata (30 kB)
+Collecting pylatexenc~=2.10 (from acl-anthology==1.3.4)
+  Downloading pylatexenc-2.11-py2.py3-none-any.whl.metadata (3.9 kB)
+Collecting stop-words==2018.7.23 (from acl-anthology==1.3.4)
+  Downloading stop-words-2018.7.23.tar.gz (31 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Requirement already satisfied: requests>=2.32.5 in ./.venv/lib/python3.12/site-packages (from acl-anthology==1.3.4) (2.34.2)
+Collecting msgspec>=0.21.0 (from acl-anthology==1.3.4)
+  Downloading msgspec-0.22.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (6.0 kB)
+Collecting docopt-ng>=0.9.0 (from acl-anthology==1.3.4)
+  Downloading docopt_ng-0.9.0-py3-none-any.whl.metadata (13 kB)
+Collecting antlr4-python3-runtime==4.9.* (from omegaconf~=2.3.0->acl-anthology==1.3.4)
+  Using cached antlr4_python3_runtime-4.9.3-py3-none-any.whl
+Collecting text-unidecode>=1.3 (from python-slugify~=9.1.3->python-slugify[unidecode]~=9.1.3->acl-anthology==1.3.4)
+  Using cached text_unidecode-1.3-py2.py3-none-any.whl.metadata (2.4 kB)
+Collecting Unidecode>=1.1.1 (from python-slugify[unidecode]~=9.1.3->acl-anthology==1.3.4)
+  Downloading Unidecode-1.4.0-py3-none-any.whl.metadata (13 kB)
+Collecting gitdb<5,>=4.0.1 (from gitpython)
+  Using cached gitdb-4.0.12-py3-none-any.whl.metadata (1.2 kB)
+Collecting smmap<6,>=3.0.1 (from gitdb<5,>=4.0.1->gitpython)
+  Downloading smmap-5.0.3-py3-none-any.whl.metadata (4.6 kB)
+Collecting language-data>=1.2 (from langcodes[data]>=3.5.1->acl-anthology==1.3.4)
+  Downloading language_data-1.4.0-py3-none-any.whl.metadata (4.3 kB)
+Collecting marisa-trie>=1.1.0 (from language-data>=1.2->langcodes[data]>=3.5.1->acl-anthology==1.3.4)
+  Downloading marisa_trie-1.4.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (10 kB)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.12/site-packages (from requests>=2.32.5->acl-anthology==1.3.4) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.12/site-packages (from requests>=2.32.5->acl-anthology==1.3.4) (3.18)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.12/site-packages (from requests>=2.32.5->acl-anthology==1.3.4) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.12/site-packages (from requests>=2.32.5->acl-anthology==1.3.4) (2026.5.20)
+Requirement already satisfied: markdown-it-py>=2.2.0 in ./.venv/lib/python3.12/site-packages (from rich>=13.3.5->acl-anthology==1.3.4) (4.2.0)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in ./.venv/lib/python3.12/site-packages (from rich>=13.3.5->acl-anthology==1.3.4) (2.20.0)
+Requirement already satisfied: mdurl~=0.1 in ./.venv/lib/python3.12/site-packages (from markdown-it-py>=2.2.0->rich>=13.3.5->acl-anthology==1.3.4) (0.1.2)
+Collecting rply (from rnc2rng>=2.6.6->acl-anthology==1.3.4)
+  Downloading rply-0.7.8-py2.py3-none-any.whl.metadata (4.2 kB)
+Collecting appdirs (from rply->rnc2rng>=2.6.6->acl-anthology==1.3.4)
+  Downloading appdirs-1.4.4-py2.py3-none-any.whl.metadata (9.0 kB)
+Downloading acl_anthology-1.3.4-py3-none-any.whl (186 kB)
+Downloading citeproc_py-0.11.1-py3-none-any.whl (387 kB)
+Downloading lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 8.2 MB/s  0:00:00
+Downloading omegaconf-2.3.1-py3-none-any.whl (79 kB)
+Downloading pylatexenc-2.11-py2.py3-none-any.whl (137 kB)
+Downloading python_slugify-9.1.3-py3-none-any.whl (16 kB)
+Downloading texsoup-0.3.3-py3-none-any.whl (33 kB)
+Downloading gitpython-3.2.1-py3-none-any.whl (231 kB)
+Using cached gitdb-4.0.12-py3-none-any.whl (62 kB)
+Downloading smmap-5.0.3-py3-none-any.whl (24 kB)
+Downloading docopt_ng-0.9.0-py3-none-any.whl (16 kB)
+Downloading langcodes-3.5.1-py3-none-any.whl (183 kB)
+Downloading language_data-1.4.0-py3-none-any.whl (5.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.6/5.6 MB 5.0 MB/s  0:00:01
+Downloading marisa_trie-1.4.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (1.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 4.7 MB/s  0:00:00
+Downloading msgspec-0.22.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (230 kB)
+Downloading rnc2rng-2.7.0-py3-none-any.whl (12 kB)
+Using cached text_unidecode-1.3-py2.py3-none-any.whl (78 kB)
+Downloading Unidecode-1.4.0-py3-none-any.whl (235 kB)
+Downloading platformdirs-4.13.5-py3-none-any.whl (32 kB)
+Downloading rply-0.7.8-py2.py3-none-any.whl (16 kB)
+Downloading appdirs-1.4.4-py2.py3-none-any.whl (9.6 kB)
+Building wheels for collected packages: stop-words
+  Building wheel for stop-words (pyproject.toml): started
+  Building wheel for stop-words (pyproject.toml): finished with status 'done'
+  Created wheel for stop-words: filename=stop_words-2018.7.23-py3-none-any.whl size=32988 sha256=635b651d2f57ad0147a41c471f4caa389906b01462c844fb1f4e01bebb6ae080
+  Stored in directory: /home/vant/.cache/pip/wheels/98/8d/87/5894deb0270ab49fc65555daa606a7d1dfa144f456bb9e0795
+Successfully built stop-words
+Installing collected packages: text-unidecode, texsoup, stop-words, pylatexenc, appdirs, antlr4-python3-runtime, Unidecode, smmap, rply, python-slugify, platformdirs, omegaconf, msgspec, marisa-trie, lxml, langcodes, docopt-ng, rnc2rng, language-data, gitdb, citeproc-py, gitpython, acl-anthology
+
+Successfully installed Unidecode-1.4.0 acl-anthology-1.3.4 antlr4-python3-runtime-4.9.3 appdirs-1.4.4 citeproc-py-0.11.1 docopt-ng-0.9.0 gitdb-4.0.12 gitpython-3.2.1 langcodes-3.5.1 language-data-1.4.0 lxml-6.1.3 marisa-trie-1.4.1 msgspec-0.22.0 omegaconf-2.3.1 platformdirs-4.13.5 pylatexenc-2.11 python-slugify-9.1.3 rnc2rng-2.7.0 rply-0.7.8 smmap-5.0.3 stop-words-2018.7.23 texsoup-0.3.3 text-unidecode-1.3

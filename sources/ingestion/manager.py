@@ -34,6 +34,7 @@ from sources.ingestion.base import (
     SnapshotStore,
 )
 from sources.common.streams import load_streams, stream_sources
+from sources.ingestion.acl_anthology_provider import AclAnthologyProvider
 from sources.ingestion.arxiv_provider import ArxivProvider
 from sources.ingestion.ieee_provider import IeeeProvider
 from sources.ingestion.openalex_provider import OpenAlexProvider
@@ -46,6 +47,7 @@ PROVIDER_CLASSES = {
     "ieee": IeeeProvider,
     "openalex": OpenAlexProvider,
     "arxiv": ArxivProvider,
+    "acl_anthology": AclAnthologyProvider,
 }
 
 

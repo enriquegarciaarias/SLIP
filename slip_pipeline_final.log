@@ -1,0 +1,1406 @@
+2026-10-16 21:26:29,037 [INFO    ] ********** STARTING Scientific Literature Intelligence Pipeline (SLIP) Process **********
+2026-10-16 21:26:29,038 [INFO    ] [Params] Config específico cargado para investigación: SensoresACL
+2026-10-16 21:26:29,829 [INFO    ] 1 CUDA devices available
+2026-10-16 21:26:29,829 [INFO    ] GPU 0 suitable: NVIDIA GeForce RTX 4060 Ti (7.6 GB)
+2026-10-16 21:26:29,830 [INFO    ] Selected GPUs: 0
+2026-10-16 21:26:29,830 [INFO    ] Configuration loaded.
+2026-10-16 21:26:29,830 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:26:29,830 [INFO    ] 🚀 [START] Processing processNormalizeSearchResults
+2026-10-16 21:26:29,830 [INFO    ] Processing 6 sources from 1 stream(s): ['default']
+2026-10-16 21:26:29,830 [INFO    ] Multiple search strategies detected: ['01', '02']
+2026-10-16 21:26:29,855 [WARNING ] [SCOPUS] Sin query para API; se usará modo file
+2026-10-16 21:26:29,855 [WARNING ] [IEEE] Sin query para API; se usará modo file
+2026-10-16 21:26:29,856 [WARNING ] [PUBMED] Sin query para API; se usará modo file
+2026-10-16 21:26:29,856 [INFO    ] Processing search strategy: 01
+2026-10-16 21:26:29,856 [WARNING ] [WOS] No files found matching: wos_export_01.txt
+2026-10-16 21:26:29,856 [INFO    ] [SCOPUS] Processing: /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/scopus_export_01.csv
+2026-10-16 21:26:29,874 [INFO    ] [SCOPUS] 200 papers saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/scopus_search_01.json
+2026-10-16 21:26:29,874 [WARNING ] [IEEE] No files found matching: ieee_export_01.csv
+2026-10-16 21:26:29,874 [WARNING ] [PUBMED] No files found matching: pubmed_export_01.txt
+2026-10-16 21:26:29,874 [INFO    ] [ACM] Processing: /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/acm_export.txt
+2026-10-16 21:26:29,875 [INFO    ] [ACM] Parsed 18 record(s) from acm_export.txt
+2026-10-16 21:26:40,978 [INFO    ] [ACM] Abstracts recuperados: 15 (quedan 3 sin completar de 18)
+2026-10-16 21:26:40,980 [INFO    ] [ACM] 18 papers saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/acm_search_01.json
+2026-10-16 21:26:40,980 [INFO    ] [ARXIV] Processing: /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/arxiv_export.csv
+2026-10-16 21:26:40,980 [INFO    ] [arXiv] Parsed 19 record(s) from arxiv_export.csv
+2026-10-16 21:26:52,471 [INFO    ] [ARXIV] Abstracts recuperados: 19 (quedan 0 sin completar de 19)
+2026-10-16 21:26:52,473 [INFO    ] [ARXIV] 19 papers saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/arxiv_search_01.json
+2026-10-16 21:26:52,473 [INFO    ] Processing search strategy: 02
+2026-10-16 21:26:52,473 [WARNING ] [WOS] No files found matching: wos_export_02.txt
+2026-10-16 21:26:52,473 [WARNING ] [IEEE] No files found matching: ieee_export_02.csv
+2026-10-16 21:26:52,473 [WARNING ] [PUBMED] No files found matching: pubmed_export_02.txt
+2026-10-16 21:26:52,473 [INFO    ] ============================================================
+2026-10-16 21:26:52,473 [INFO    ] NORMALIZATION COMPLETE
+2026-10-16 21:26:52,473 [INFO    ] ============================================================
+2026-10-16 21:26:52,473 [INFO    ]   SCOPUS: 200 papers
+2026-10-16 21:26:52,473 [INFO    ]   ACM: 18 papers
+2026-10-16 21:26:52,473 [INFO    ]   ARXIV: 19 papers
+2026-10-16 21:26:52,473 [INFO    ]   TOTAL: 237 papers
+2026-10-16 21:26:52,474 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:26:52,474 [INFO    ] 🚀 [START] Processing processSearchMergeEngine
+2026-10-16 21:26:52,474 [INFO    ] [MERGE] Processing sources: ['wos', 'scopus', 'ieee', 'pubmed', 'acm', 'arxiv']
+2026-10-16 21:26:52,474 [WARNING ] [MERGE] No search data found for wos in /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL
+2026-10-16 21:26:52,479 [INFO    ] [MERGE] Loaded 499 papers from scopus_search.json
+2026-10-16 21:26:52,483 [INFO    ] [MERGE] Loaded 200 papers from scopus_search_01.json
+2026-10-16 21:26:52,490 [INFO    ] [MERGE] Loaded 398 papers from ieee_search.json
+2026-10-16 21:26:52,533 [INFO    ] [MERGE] Loaded 500 papers from pubmed_search.json
+2026-10-16 21:26:52,533 [INFO    ] [MERGE] Loaded 18 papers from acm_search.json
+2026-10-16 21:26:52,533 [INFO    ] [MERGE] Loaded 18 papers from acm_search_01.json
+2026-10-16 21:26:52,533 [INFO    ] [MERGE] Loaded 19 papers from arxiv_search.json
+2026-10-16 21:26:52,534 [INFO    ] [MERGE] Loaded 19 papers from arxiv_search_01.json
+2026-10-16 21:26:52,813 [INFO    ] ============================================================
+2026-10-16 21:26:52,813 [INFO    ] [MERGE] COMPLETE
+2026-10-16 21:26:52,813 [INFO    ] ============================================================
+2026-10-16 21:26:52,813 [INFO    ]   Raw papers: 1671
+2026-10-16 21:26:52,813 [INFO    ]   Unique papers: 1394
+2026-10-16 21:26:52,813 [INFO    ]   Duplicates removed: 277
+2026-10-16 21:26:52,813 [INFO    ]   Merged groups (multi-source): 234
+2026-10-16 21:26:52,813 [INFO    ]     [scopus_14] merged 16 records from ['scopus']
+2026-10-16 21:26:52,814 [INFO    ]     [ieee_161] merged 3 records from ['ieee', 'pubmed', 'scopus']
+2026-10-16 21:26:52,814 [INFO    ]     [ieee_19] merged 3 records from ['ieee', 'pubmed', 'scopus']
+2026-10-16 21:26:52,814 [INFO    ]   ACM: 18 unique papers
+2026-10-16 21:26:52,814 [INFO    ]   ARXIV: 19 unique papers
+2026-10-16 21:26:52,814 [INFO    ]   IEEE: 398 unique papers
+2026-10-16 21:26:52,814 [INFO    ]   PUBMED: 495 unique papers
+2026-10-16 21:26:52,814 [INFO    ]   SCOPUS: 638 unique papers
+2026-10-16 21:26:52,814 [INFO    ]   Output: /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/canonical.json
+2026-10-16 21:26:55,273 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:26:55,273 [INFO    ] 🚀 [START] Processing processRankingEngine
+2026-10-16 21:26:55,331 [INFO    ] [RankingEngine] Loaded 1394 candidate papers
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 17730.19it/s]
+Batches:   0%|          | 0/44 [00:00<?, ?it/s]Batches:   2%|▏         | 1/44 [00:00<00:15,  2.84it/s]Batches:   5%|▍         | 2/44 [00:00<00:15,  2.73it/s]Batches:   7%|▋         | 3/44 [00:01<00:14,  2.78it/s]Batches:   9%|▉         | 4/44 [00:01<00:14,  2.81it/s]Batches:  11%|█▏        | 5/44 [00:01<00:13,  2.83it/s]Batches:  14%|█▎        | 6/44 [00:02<00:13,  2.84it/s]Batches:  16%|█▌        | 7/44 [00:02<00:13,  2.84it/s]Batches:  18%|█▊        | 8/44 [00:02<00:12,  2.84it/s]Batches:  20%|██        | 9/44 [00:03<00:12,  2.85it/s]Batches:  23%|██▎       | 10/44 [00:03<00:11,  2.86it/s]Batches:  25%|██▌       | 11/44 [00:03<00:11,  2.87it/s]Batches:  27%|██▋       | 12/44 [00:04<00:11,  2.87it/s]Batches:  30%|██▉       | 13/44 [00:04<00:10,  2.93it/s]Batches:  32%|███▏      | 14/44 [00:04<00:10,  2.96it/s]Batches:  34%|███▍      | 15/44 [00:05<00:09,  3.07it/s]Batches:  36%|███▋      | 16/44 [00:05<00:09,  3.03it/s]Batches:  39%|███▊      | 17/44 [00:05<00:08,  3.06it/s]Batches:  41%|████      | 18/44 [00:06<00:08,  3.15it/s]Batches:  43%|████▎     | 19/44 [00:06<00:07,  3.24it/s]Batches:  45%|████▌     | 20/44 [00:06<00:07,  3.14it/s]Batches:  48%|████▊     | 21/44 [00:07<00:07,  3.21it/s]Batches:  50%|█████     | 22/44 [00:07<00:06,  3.34it/s]Batches:  52%|█████▏    | 23/44 [00:07<00:06,  3.44it/s]Batches:  55%|█████▍    | 24/44 [00:07<00:05,  3.50it/s]Batches:  57%|█████▋    | 25/44 [00:08<00:05,  3.70it/s]Batches:  59%|█████▉    | 26/44 [00:08<00:04,  3.81it/s]Batches:  61%|██████▏   | 27/44 [00:08<00:04,  3.98it/s]Batches:  64%|██████▎   | 28/44 [00:08<00:03,  4.07it/s]Batches:  66%|██████▌   | 29/44 [00:09<00:03,  4.07it/s]Batches:  68%|██████▊   | 30/44 [00:09<00:03,  4.13it/s]Batches:  70%|███████   | 31/44 [00:09<00:02,  4.36it/s]Batches:  73%|███████▎  | 32/44 [00:09<00:02,  4.60it/s]Batches:  75%|███████▌  | 33/44 [00:09<00:02,  4.84it/s]Batches:  77%|███████▋  | 34/44 [00:09<00:01,  5.40it/s]Batches:  86%|████████▋ | 38/44 [00:10<00:00, 11.74it/s]Batches:  98%|█████████▊| 43/44 [00:10<00:00, 19.52it/s]Batches: 100%|██████████| 44/44 [00:10<00:00,  4.31it/s]
+2026-10-16 21:27:08,666 [INFO    ] [RankingEngine] Flujo 'default': 1394 candidatos -> 100 seleccionados (top_k=100)
+2026-10-16 21:27:08,677 [INFO    ] [RankingEngine] Saved 100 ranked papers to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/ranked_papers.json (from 1394 total, 1 stream(s))
+2026-10-16 21:27:08,731 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:27:08,731 [INFO    ] 🚀 [START] Processing processEnrichmentEngine
+2026-10-16 21:27:08,731 [INFO    ] 📄 JSON loaded from /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/ranked_papers.json
+2026-10-16 21:27:08,735 [INFO    ] [Enrichment] Loaded 100 valid papers from ranked_papers.json
+2026-10-16 21:27:08,735 [INFO    ] [Enrich] 1/100 [ieee_86] LLM-Powered Dysphagia Screening With Multimodal Physiologica
+2026-10-16 21:27:10,002 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1109/tnsre.2026.3674934
+2026-10-16 21:27:10,202 [INFO    ] [Enrich] 2/100 [ieee_25] guided clinical reasoning with llms reconstructing the phq 9
+2026-10-16 21:27:11,390 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.2139/ssrn.5334281
+2026-10-16 21:27:11,590 [INFO    ] [Enrich] 3/100 [scopus_150] standardization of neuromuscular reflex analysis role of fin
+2026-10-16 21:27:12,846 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/2673-7078/6/1/23/pdf?version=1772526156
+2026-10-16 21:27:13,047 [INFO    ] [Enrich] 4/100 [ieee_296] lightweight vision language model guided gesture recognition
+2026-10-16 21:27:36,612 [INFO    ] [Enrich] 5/100 [pubmed_217] A bimodal large language model reduces misalignment in patie
+2026-10-16 21:27:59,952 [INFO    ] [Enrich] 6/100 [pubmed_372] Large language models generate diagnostic likelihood ratios 
+2026-10-16 21:28:01,155 [INFO    ] [PDFResolver] Resolved via openalex: https://www.nature.com/articles/s41598-026-61766-2_reference.pdf
+2026-10-16 21:28:01,356 [INFO    ] [Enrich] 7/100 [pubmed_270] Near-optimal P300 speller performance using large language m
+2026-10-16 21:28:02,557 [INFO    ] [PDFResolver] Resolved via openalex: https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0349281&type=printable
+2026-10-16 21:28:02,757 [INFO    ] [Enrich] 8/100 [pubmed_271] Multidisciplinary blinded randomized expert evaluation of la
+2026-10-16 21:28:04,226 [INFO    ] [PDFResolver] Resolved via openalex: https://www.nature.com/articles/s43856-026-01576-9.pdf
+2026-10-16 21:28:04,427 [INFO    ] [Enrich] 9/100 [pubmed_216] Assessing the performance of zero-shot visual question answe
+2026-10-16 21:28:05,821 [INFO    ] [PDFResolver] Resolved via openalex: https://public-pages-files-2025.frontiersin.org/journals/cardiovascular-medicine/articles/10.3389/fcvm.2025.1458289/pdf
+2026-10-16 21:28:06,021 [INFO    ] [Enrich] 10/100 [pubmed_335] Artificial Intelligence for Biomedical Diagnostics: Diagnost
+2026-10-16 21:28:07,387 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/2075-1729/16/4/681/pdf?version=1776331826
+2026-10-16 21:28:07,587 [INFO    ] [Enrich] 11/100 [pubmed_2] A personal health large language model for sleep and fitness
+2026-10-16 21:28:09,131 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1038/s41591-025-03888-0
+2026-10-16 21:28:09,331 [INFO    ] [Enrich] 12/100 [scopus_30] Vision-Language Models in ECG Interpretation: An Exploratory
+2026-10-16 21:28:09,331 [WARNING ] [Enrich] [scopus_30] No DOI: 'Vision-Language Models in ECG Interpretation: An Exploratory'
+2026-10-16 21:28:31,941 [INFO    ] [Enrich] 13/100 [pubmed_422] Cognitive Processes of Probabilistic Prediction in Reading: 
+2026-10-16 21:28:33,303 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.3390/jintelligence14080171
+2026-10-16 21:28:33,503 [INFO    ] [Enrich] 14/100 [pubmed_14] The potential of Generative Pre-trained Transformer 4 (GPT-4
+2026-10-16 21:28:35,071 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1016/s2589-7500(24)00246-2
+2026-10-16 21:28:35,271 [INFO    ] [Enrich] 15/100 [pubmed_8] Functional Re-organization of Cortical Networks of Senior Ci
+2026-10-16 21:28:36,601 [INFO    ] [PDFResolver] Resolved via openalex: https://www.frontiersin.org/articles/10.3389/fnagi.2018.00422/pdf
+2026-10-16 21:28:36,802 [INFO    ] [Enrich] 16/100 [pubmed_30] Foundation model of ECG diagnosis: Diagnostics and explanati
+2026-10-16 21:28:38,502 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1016/j.xcrm.2024.101875
+2026-10-16 21:28:38,702 [INFO    ] [Enrich] 17/100 [pubmed_80] An information-theoretic analysis of targeted regressions du
+2026-10-16 21:28:39,919 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1016/j.cognition.2024.105765
+2026-10-16 21:28:40,120 [INFO    ] [Enrich] 18/100 [pubmed_300] The unique contribution of uncertainty reduction during natu
+2026-10-16 21:28:44,268 [INFO    ] [Enrich] 19/100 [pubmed_188] Performance and Hallucination Analysis of Large Language Mod
+2026-10-16 21:28:45,486 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.2196/95859
+2026-10-16 21:28:45,686 [INFO    ] [Enrich] 20/100 [pubmed_113] Physiological and Perceptual Responses of a Guard Passing Te
+2026-10-16 21:29:04,153 [INFO    ] [Enrich] 21/100 [scopus_37] Toward Multimodal AI for Dementia: A Challenge-Driven Survey
+2026-10-16 21:29:22,894 [INFO    ] [Enrich] 22/100 [pubmed_154] ChatGPT's Limitations in Athlete ECG Interpretation: Evidenc
+2026-10-16 21:29:24,168 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/2308-3425/13/5/191/pdf?version=1778835877
+2026-10-16 21:29:24,369 [INFO    ] [Enrich] 23/100 [scopus_3] time2lang bridging time series foundation models and large l
+2026-10-16 21:29:24,369 [WARNING ] [Enrich] [scopus_3] No DOI: 'time2lang bridging time series foundation models and large l'
+2026-10-16 21:29:27,015 [INFO    ] [Enrich] 24/100 [ieee_52] Recognition of Cardiac Pathology and Late Potentials on ECG 
+2026-10-16 21:29:45,278 [INFO    ] [Enrich] 25/100 [pubmed_253] Large language models in clinical nutrition: an overview of 
+2026-10-16 21:29:46,500 [INFO    ] [PDFResolver] Resolved via openalex: https://www.frontiersin.org/journals/nutrition/articles/10.3389/fnut.2025.1635682/pdf
+2026-10-16 21:29:46,701 [INFO    ] [Enrich] 26/100 [scopus_47] 2-D GAF-Enhanced Multimodal Vision Language Model for Breath
+2026-10-16 21:29:50,087 [INFO    ] [Enrich] 27/100 [pubmed_467] Feasibility study on a noninvasive assessment of ALS patient
+2026-10-16 21:29:51,446 [INFO    ] [PDFResolver] Resolved via openalex: https://www.frontiersin.org/journals/digital-health/articles/10.3389/fdgth.2026.1886561/pdf
+2026-10-16 21:29:51,646 [INFO    ] [Enrich] 28/100 [pubmed_289] Lightweight Language Models are Prone to Reasoning Errors fo
+2026-10-16 21:29:51,646 [WARNING ] [Enrich] [pubmed_289] No DOI: 'Lightweight Language Models are Prone to Reasoning Errors fo'
+2026-10-16 21:29:54,403 [INFO    ] [Enrich] 29/100 [pubmed_83] Application of large language models in disease diagnosis an
+2026-10-16 21:29:55,836 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1097/cm9.0000000000003456
+2026-10-16 21:29:56,036 [INFO    ] [Enrich] 30/100 [pubmed_329] StressSpeak: A Speech-Driven Framework for Real-Time Persona
+2026-10-16 21:29:57,323 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/2075-4418/15/22/2871/pdf?version=1762960869
+2026-10-16 21:29:57,523 [INFO    ] [Enrich] 31/100 [scopus_66] a novel chain of thought reasoning approach for alzheimer s 
+2026-10-16 21:29:58,690 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1109/tnsre.2025.3624762
+2026-10-16 21:29:58,890 [INFO    ] [Enrich] 32/100 [pubmed_39] Performance of Vision-Enabled Large Language Models in Image
+2026-10-16 21:30:00,147 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.2196/86692
+2026-10-16 21:30:00,347 [INFO    ] [Enrich] 33/100 [pubmed_100] Smarter Together: Combining Large Language Models and Small 
+2026-10-16 21:30:03,585 [INFO    ] [Enrich] 34/100 [pubmed_246] Reducing robotic upper-limb assessment time while maintainin
+2026-10-16 21:30:04,816 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1186/s12984-026-02012-8
+2026-10-16 21:30:05,017 [INFO    ] [Enrich] 35/100 [pubmed_36] Mental-LLM: Leveraging Large Language Models for Mental Heal
+2026-10-16 21:30:06,449 [INFO    ] [PDFResolver] Resolved via openalex: https://arxiv.org/pdf/2307.14385
+2026-10-16 21:30:06,649 [INFO    ] [Enrich] 36/100 [pubmed_210] LLM-Enhanced Multi-Teacher Knowledge Distillation for Modali
+2026-10-16 21:30:26,101 [INFO    ] [Enrich] 37/100 [ieee_328] enhancing typing speed in llm based p300 speller bcis using 
+2026-10-16 21:30:49,078 [INFO    ] [Enrich] 38/100 [pubmed_494] Investigating the test-retest reliability and behavioral cor
+2026-10-16 21:30:50,514 [INFO    ] [PDFResolver] Resolved via openalex: https://www.nature.com/articles/s41598-026-46731-3_reference.pdf
+2026-10-16 21:30:50,714 [INFO    ] [Enrich] 39/100 [ieee_131] Multi-Modal Integration Analysis of Alzheimer’s Disease Usin
+2026-10-16 21:30:52,073 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1109/access.2025.3582853
+2026-10-16 21:30:52,273 [INFO    ] [Enrich] 40/100 [ieee_366] parla a proposal for a brain computer interface assistive co
+2026-10-16 21:30:55,703 [INFO    ] [Enrich] 41/100 [pubmed_248] Reference Hallucination, Citation Reliability, and Readabili
+2026-10-16 21:30:58,639 [INFO    ] [Enrich] 42/100 [ieee_60] physiollm supporting personalized health insights with weara
+2026-10-16 21:30:59,864 [INFO    ] [PDFResolver] Resolved via openalex: https://arxiv.org/pdf/2406.19283
+2026-10-16 21:31:00,064 [INFO    ] [Enrich] 43/100 [pubmed_357] Performance of large language models in electrocardiogram in
+2026-10-16 21:31:23,489 [INFO    ] [Enrich] 44/100 [ieee_53] StressLLM: Large Language Models for Stress Prediction via W
+2026-10-16 21:31:46,320 [INFO    ] [Enrich] 45/100 [scopus_129] A review of the emergence of AI-driven cognitive digital phe
+2026-10-16 21:32:10,047 [INFO    ] [Enrich] 46/100 [pubmed_232] EMTeC: A corpus of eye movements on machine-generated texts.
+2026-10-16 21:32:11,384 [INFO    ] [PDFResolver] Resolved via openalex: https://link.springer.com/content/pdf/10.3758/s13428-025-02677-4.pdf
+2026-10-16 21:32:11,584 [INFO    ] [Enrich] 47/100 [ieee_63] large language models for automated sleep staging
+2026-10-16 21:32:14,666 [INFO    ] [Enrich] 48/100 [pubmed_227] Assessing the Role of Large Language Models Between ChatGPT 
+2026-10-16 21:32:15,881 [INFO    ] [PDFResolver] Resolved via openalex: https://medinform.jmir.org/2025/1/e65365/PDF
+2026-10-16 21:32:16,081 [INFO    ] [Enrich] 49/100 [ieee_72] ai driven wearable sensor analytics for dementia monitoring 
+2026-10-16 21:32:34,430 [INFO    ] [Enrich] 50/100 [scopus_71] How Well Can Vision-Language Models Interpret ECGs? A Multi-
+2026-10-16 21:32:58,162 [INFO    ] [Enrich] 51/100 [ieee_12] TrustCardio: A Multimodal Large Language Model with Chain-of
+2026-10-16 21:33:01,305 [INFO    ] [Enrich] 52/100 [pubmed_229] Evaluating few-shot prompting for spectrogram-based lung sou
+2026-10-16 21:33:02,503 [INFO    ] [PDFResolver] Resolved via openalex: https://journals.plos.org/digitalhealth/article/file?id=10.1371/journal.pdig.0001179&type=printable
+2026-10-16 21:33:02,703 [INFO    ] [Enrich] 53/100 [arxiv_6] MS-ECG-FM: Towards a More Universal Electrocardiogram Founda
+2026-10-16 21:33:02,703 [WARNING ] [Enrich] [arxiv_6] No DOI: 'MS-ECG-FM: Towards a More Universal Electrocardiogram Founda'
+2026-10-16 21:33:25,576 [INFO    ] [Enrich] 54/100 [ieee_16] leveraging foundation models for calibration free c vep bcis
+2026-10-16 21:33:26,799 [INFO    ] [PDFResolver] Resolved via openalex: https://arxiv.org/pdf/2601.06028
+2026-10-16 21:33:27,000 [INFO    ] [Enrich] 55/100 [pubmed_338] A Selective RAG-Enhanced Hybrid ML-LLM Framework for Efficie
+2026-10-16 21:33:28,193 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/2306-5354/13/1/58/pdf?version=1767487773
+2026-10-16 21:33:28,393 [INFO    ] [Enrich] 56/100 [pubmed_107] Establishing a real-time biomarker-to-LLM interface: a modul
+2026-10-16 21:33:29,555 [INFO    ] [PDFResolver] Resolved via openalex: https://www.frontiersin.org/journals/digital-health/articles/10.3389/fdgth.2025.1670464/pdf
+2026-10-16 21:33:29,755 [INFO    ] [Enrich] 57/100 [ieee_77] Integrating Large Language Models with Formal Planning to Au
+2026-10-16 21:33:32,991 [INFO    ] [Enrich] 58/100 [ieee_24] Graph Representations for Reading Comprehension Analysis usi
+2026-10-16 21:33:34,367 [INFO    ] [PDFResolver] Resolved via openalex: https://arxiv.org/pdf/2507.11972
+2026-10-16 21:33:34,567 [INFO    ] [Enrich] 59/100 [pubmed_440] Reading to Translate or Translating to Read? Modeling Transl
+2026-10-16 21:33:36,135 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.3390/jemr19030066
+2026-10-16 21:33:36,336 [INFO    ] [Enrich] 60/100 [pubmed_77] Few-Shot Optimization for Sensor Data Using Large Language M
+2026-10-16 21:33:37,786 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/1424-8220/25/11/3324/pdf?version=1748169079
+2026-10-16 21:33:37,986 [INFO    ] [Enrich] 61/100 [pubmed_480] Predictability effects in natural reading are logarithmic: E
+2026-10-16 21:33:39,188 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.31234/osf.io/kt3sw_v1
+2026-10-16 21:33:39,388 [INFO    ] [Enrich] 62/100 [ieee_82] Contextualizing Borderline ECG Analysis via Multi-Modal Feat
+2026-10-16 21:33:58,008 [INFO    ] [Enrich] 63/100 [pubmed_351] A multimodal multi-agent LLM framework for identifying key d
+2026-10-16 21:33:59,239 [INFO    ] [PDFResolver] Resolved via openalex: https://www.frontiersin.org/journals/neurology/articles/10.3389/fneur.2026.1851192/pdf
+2026-10-16 21:33:59,439 [INFO    ] [Enrich] 64/100 [pubmed_411] Linguistics and human brain: a perspective of computational 
+2026-10-16 21:34:00,621 [INFO    ] [PDFResolver] Resolved via openalex: https://link.springer.com/content/pdf/10.1007/s11571-026-10496-2.pdf
+2026-10-16 21:34:00,821 [INFO    ] [Enrich] 65/100 [pubmed_17] Interhemispheric differences in time-frequency representatio
+2026-10-16 21:34:24,348 [INFO    ] [Enrich] 66/100 [scopus_147] PhysVLM: Vision-Language Model for Generalizable Multitask R
+2026-10-16 21:34:47,433 [INFO    ] [Enrich] 67/100 [ieee_325] beyond labels generating clinical text for ecgs with domain 
+2026-10-16 21:35:10,612 [INFO    ] [Enrich] 68/100 [pubmed_19] Language-Model Assisted Brain Computer Interface for Typing:
+2026-10-16 21:35:33,730 [INFO    ] [Enrich] 69/100 [ieee_19] TinnitusLLM: A Multimodal Large Language Model Framework for
+2026-10-16 21:35:57,983 [INFO    ] [Enrich] 70/100 [ieee_197] multi task multi emotion joint representation and llm based 
+2026-10-16 21:36:16,334 [INFO    ] [Enrich] 71/100 [ieee_161] Large Language Model-informed ECG Dual Attention Network for
+2026-10-16 21:36:17,682 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1109/tbdata.2025.3536922
+2026-10-16 21:36:17,883 [INFO    ] [Enrich] 72/100 [pubmed_225] Sentence-Level Silent Speech Recognition Using a Wearable EM
+2026-10-16 21:36:19,087 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/1424-8220/25/19/6168/pdf?version=1759643301
+2026-10-16 21:36:19,288 [INFO    ] [Enrich] 73/100 [pubmed_56] Large Language Model-Driven Throat-Wearable Sensing System f
+2026-10-16 21:36:22,964 [INFO    ] [Enrich] 74/100 [ieee_337] artificial intelligence for speech classification and enhanc
+2026-10-16 21:36:24,131 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1109/access.2025.3620114
+2026-10-16 21:36:24,332 [INFO    ] [Enrich] 75/100 [ieee_124] transformer and attention based models for automated pain as
+2026-10-16 21:36:25,550 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1109/access.2026.3713429
+2026-10-16 21:36:25,750 [INFO    ] [Enrich] 76/100 [scopus_190] Few-shot ECG analysis with large vision language models in d
+2026-10-16 21:36:26,935 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1016/j.compbiomed.2026.111816
+2026-10-16 21:36:27,135 [INFO    ] [Enrich] 77/100 [pubmed_268] The economics of accuracy for medical reasoning with large l
+2026-10-16 21:36:28,359 [INFO    ] [PDFResolver] Resolved via openalex: https://journals.plos.org/digitalhealth/article/file?id=10.1371/journal.pdig.0001182&type=printable
+2026-10-16 21:36:28,559 [INFO    ] [Enrich] 78/100 [pubmed_257] HybridSense-LLM: A Structured Multimodal Framework for Large
+2026-10-16 21:36:29,781 [INFO    ] [PDFResolver] Resolved via openalex: https://www.mdpi.com/2306-5354/13/1/120/pdf
+2026-10-16 21:36:29,981 [INFO    ] [Enrich] 79/100 [pubmed_211] Evaluating Representation Embeddings from LLMs and Time-Seri
+2026-10-16 21:36:29,981 [WARNING ] [Enrich] [pubmed_211] No DOI: 'Evaluating Representation Embeddings from LLMs and Time-Seri'
+2026-10-16 21:36:32,777 [INFO    ] [Enrich] 80/100 [ieee_217] Multimodal Sleep Stage Classification with LLM based Sleep R
+2026-10-16 21:36:55,761 [INFO    ] [Enrich] 81/100 [ieee_20] MedTsLLM: Medical Time Series Analysis Using Multimodal LLMs
+2026-10-16 21:37:15,416 [INFO    ] [Enrich] 82/100 [pubmed_16] Language Model-Guided Classifier Adaptation for Brain-Comput
+2026-10-16 21:37:16,603 [INFO    ] [PDFResolver] Resolved via openalex: https://www.ncbi.nlm.nih.gov/pmc/articles/9910722
+2026-10-16 21:37:16,803 [INFO    ] [Enrich] 83/100 [pubmed_469] Emotion recognition in cross-linguistic legal context: a com
+2026-10-16 21:37:18,005 [INFO    ] [PDFResolver] Resolved via openalex: https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2026.1859697/pdf
+2026-10-16 21:37:18,205 [INFO    ] [Enrich] 84/100 [pubmed_291] Interpretable depressive symptoms screening via statistical 
+2026-10-16 21:37:19,650 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1038/s41598-026-47312-0
+2026-10-16 21:37:19,850 [INFO    ] [Enrich] 85/100 [ieee_267] Assessing Visual Reasoning of Multimodal Language Models in 
+2026-10-16 21:37:43,026 [INFO    ] [Enrich] 86/100 [pubmed_133] Large language models in sports cardiology: Challenges, gove
+2026-10-16 21:38:01,608 [INFO    ] [Enrich] 87/100 [ieee_18] EEG-Informed Adaptive User Experience Questionnaire Generati
+2026-10-16 21:38:20,871 [INFO    ] [Enrich] 88/100 [pubmed_60] SIGNAL: Dataset for Semantic and Inferred Grammar Neurologic
+2026-10-16 21:38:22,222 [INFO    ] [PDFResolver] Resolved via openalex: https://www.nature.com/articles/s41597-025-05966-x.pdf
+2026-10-16 21:38:22,423 [INFO    ] [Enrich] 89/100 [ieee_180] multimodal models for comprehensive cardiac diagnostics via 
+2026-10-16 21:38:45,596 [INFO    ] [Enrich] 90/100 [pubmed_138] A case study on using a large language model to analyze cont
+2026-10-16 21:38:46,811 [INFO    ] [PDFResolver] Resolved via openalex: https://www.nature.com/articles/s41598-024-84003-0.pdf
+2026-10-16 21:38:47,011 [INFO    ] [Enrich] 91/100 [pubmed_332] Resting-state fMRI foundation models enable robust and gener
+2026-10-16 21:38:48,090 [INFO    ] [PDFResolver] Resolved via openalex: https://www.biorxiv.org/content/biorxiv/early/2026/01/02/2025.12.30.697042.full.pdf
+2026-10-16 21:38:48,290 [INFO    ] [Enrich] 92/100 [pubmed_28] CMA-ECG: cross-modal attention for enhanced ECG quality asse
+2026-10-16 21:39:11,403 [INFO    ] [Enrich] 93/100 [ieee_249] aslring american sign language recognition with meta learnin
+2026-10-16 21:39:34,510 [INFO    ] [Enrich] 94/100 [ieee_58] From Theory to Application: Fine-Tuning Large Eeg Model with
+2026-10-16 21:39:35,822 [INFO    ] [PDFResolver] Resolved via openalex: https://arxiv.org/pdf/2505.23042
+2026-10-16 21:39:36,022 [INFO    ] [Enrich] 95/100 [ieee_6] Classification of non-invasive EEG signals during Motor Imag
+2026-10-16 21:39:55,312 [INFO    ] [Enrich] 96/100 [scopus_126] are time series foundation models ready for vital sign forec
+2026-10-16 21:39:55,313 [WARNING ] [Enrich] [scopus_126] No DOI: 'are time series foundation models ready for vital sign forec'
+2026-10-16 21:40:17,964 [INFO    ] [Enrich] 97/100 [pubmed_290] Depression detection using deep learning and large language 
+2026-10-16 21:40:19,224 [INFO    ] [PDFResolver] Resolved via openalex: https://public-pages-files-2025.frontiersin.org/journals/digital-health/articles/10.3389/fdgth.2026.1759857/pdf
+2026-10-16 21:40:19,425 [INFO    ] [Enrich] 98/100 [pubmed_294] The Role of Multimodal Generative AI in Older Adults' Health
+2026-10-16 21:40:20,821 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.2196/84695
+2026-10-16 21:40:21,022 [INFO    ] [Enrich] 99/100 [pubmed_387] Large language models for structuring knee ultrasound report
+2026-10-16 21:40:22,380 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1186/s12911-026-03415-2
+2026-10-16 21:40:22,581 [INFO    ] [Enrich] 100/100 [pubmed_330] Supervised machine learning compared to large language model
+2026-10-16 21:40:24,116 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1111/epi.18272
+2026-10-16 21:41:26,946 [WARNING ] [Selection] 32 papers del checkpoint ya no están en el ranking actual; se descartan (no se pueden refrescar).
+2026-10-16 21:41:26,946 [INFO    ] [Selection] Resuming from index 100
+2026-10-16 21:41:26,946 [INFO    ] [Selection] Already selected: 68
+2026-10-16 21:41:26,948 [INFO    ] [Enrichment] Selected: 68 papers
+2026-10-16 21:41:26,948 [INFO    ] [Enrichment] Rejected: 0 papers
+2026-10-16 21:41:26,948 [INFO    ] [Enrichment] Saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/selected_papers.json
+2026-10-16 21:41:26,948 [INFO    ] ✅ [END] processEnrichmentEngine
+2026-10-16 21:41:26,994 [INFO    ] 🚀 [START] Processing processManualPapersScanner
+2026-10-16 21:41:26,994 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:41:26,994 [INFO    ] 🚀 [START] Processing processManualPapersScanner
+2026-10-16 21:41:26,994 [INFO    ] [ManualScanner] No hay PDFs en /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/manual_papers. Skipping.
+2026-10-16 21:41:26,994 [INFO    ] 🚀 [START] Processing processManualIngestion
+2026-10-16 21:41:26,995 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:41:26,995 [INFO    ] 🚀 [START] Processing processManualIngestion
+2026-10-16 21:41:26,995 [INFO    ] [Ingestion] No manual_papers.json found. Skipping.
+2026-10-16 21:41:26,995 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:41:26,995 [INFO    ] 🚀 [START] Processing processAcquisitionEngine
+2026-10-16 21:41:26,996 [INFO    ] 🚫 Blacklist aplicada: 0 papers excluidos (total ahora 68)
+2026-10-16 21:41:26,996 [INFO    ] Total de papers en entrada: 68
+2026-10-16 21:41:26,996 [INFO    ] [1/68] Evaluating: ieee_86...
+2026-10-16 21:41:26,996 [INFO    ]   🚀 VAULT HIT: Copiando desde 797b036ed2c57f9ce534628fe71d3da8677761f2.pdf
+2026-10-16 21:41:26,999 [INFO    ] [2/68] Evaluating: ieee_25...
+2026-10-16 21:41:26,999 [INFO    ]   🚀 VAULT HIT: Copiando desde 6768f4d335de8213cf0e752e756b7b3e5124bcee.pdf
+2026-10-16 21:41:27,000 [INFO    ] [3/68] Evaluating: ieee_296...
+2026-10-16 21:41:27,000 [INFO    ]   🚀 VAULT HIT: Copiando desde 763c863fcfc58100e15649550646fdd31a04fd21.pdf
+2026-10-16 21:41:27,001 [INFO    ] [4/68] Evaluating: pubmed_217...
+2026-10-16 21:41:27,001 [INFO    ] Direct URL failed/missing. Triggering resolution cascade...
+2026-10-16 21:41:30,079 [WARNING ]   ❌ Automatización fallida. Iniciando recuperación manual...
+2026-10-16 21:41:30,079 [WARNING ] 📄 PAPELERA DE RECUPERACIÓN MANUAL [4/68]
+2026-10-16 21:42:30,099 [WARNING ] [Adquisition] Entorno no interactivo detectado. Omitiendo PDF manual para pubmed_217.
+2026-10-16 21:42:30,099 [INFO    ] [5/68] Evaluating: pubmed_270...
+2026-10-16 21:42:30,099 [INFO    ]   🚀 VAULT HIT: Copiando desde e574dfac7b34667da8a77286252f6f42ecdc95e6.pdf
+2026-10-16 21:42:30,101 [INFO    ] [6/68] Evaluating: pubmed_216...
+2026-10-16 21:42:30,101 [INFO    ]   🚀 VAULT HIT: Copiando desde bdffe1f9b074a90dc73364f9555035921cafceca.pdf
+2026-10-16 21:42:30,103 [INFO    ] [7/68] Evaluating: pubmed_2...
+2026-10-16 21:42:30,103 [INFO    ]   🚀 VAULT HIT: Copiando desde a7ee4176bd664f948ed0490ecf3034a56a4542d9.pdf
+2026-10-16 21:42:30,108 [INFO    ] [8/68] Evaluating: pubmed_14...
+2026-10-16 21:42:30,662 [INFO    ] Direct URL failed/missing. Triggering resolution cascade...
+2026-10-16 21:42:31,788 [INFO    ] [PDFResolver] Resolved via openalex: https://doi.org/10.1016/s2589-7500(24)00246-2
+2026-10-16 21:42:32,016 [WARNING ]   ❌ Automatización fallida. Iniciando recuperación manual...
+2026-10-16 21:42:32,017 [WARNING ] 📄 PAPELERA DE RECUPERACIÓN MANUAL [8/68]
+2026-10-16 21:43:32,034 [WARNING ] [Adquisition] Entorno no interactivo detectado. Omitiendo PDF manual para pubmed_14.
+2026-10-16 21:43:32,034 [INFO    ] [9/68] Evaluating: pubmed_8...
+2026-10-16 21:43:32,035 [INFO    ]   🚀 VAULT HIT: Copiando desde 1c3a33514c2ff21506a21c6689434164785aac5a.pdf
+2026-10-16 21:43:32,036 [INFO    ] [10/68] Evaluating: pubmed_30...
+2026-10-16 21:43:32,036 [INFO    ]   🚀 VAULT HIT: Copiando desde d1a6fab9414dc27ce67797bd659a3f4ba747ab6f.pdf
+2026-10-16 21:43:32,066 [INFO    ] [11/68] Evaluating: pubmed_80...
+2026-10-16 21:43:32,066 [INFO    ]   🚀 VAULT HIT: Copiando desde 8d1e1f6072d8c3694de84d0a90d828daa6128c58.pdf
+2026-10-16 21:43:32,068 [INFO    ] [12/68] Evaluating: pubmed_188...
+2026-10-16 21:43:32,068 [INFO    ]   🚀 VAULT HIT: Copiando desde fff56b747de2eef6bab8db2fdd2bd2eb99b29a3e.pdf
+2026-10-16 21:43:32,068 [INFO    ] [13/68] Evaluating: pubmed_113...
+2026-10-16 21:43:32,069 [INFO    ] Direct URL failed/missing. Triggering resolution cascade...
+2026-10-16 21:43:50,225 [WARNING ]   ❌ Automatización fallida. Iniciando recuperación manual...
+2026-10-16 21:43:50,225 [WARNING ] 📄 PAPELERA DE RECUPERACIÓN MANUAL [13/68]
+2026-10-16 21:44:50,247 [WARNING ] [Adquisition] Entorno no interactivo detectado. Omitiendo PDF manual para pubmed_113.
+2026-10-16 21:44:50,247 [INFO    ] [14/68] Evaluating: pubmed_154...
+2026-10-16 21:44:50,247 [INFO    ]   🚀 VAULT HIT: Copiando desde 292db0d911cbb714e812ad62254e8fea17e400b3.pdf
+2026-10-16 21:44:50,248 [INFO    ] [15/68] Evaluating: ieee_52...
+2026-10-16 21:44:50,248 [INFO    ]   🚀 VAULT HIT: Copiando desde 3a59b720fe2ea74e873b15bcfc5f5bae7a021b8c.pdf
+2026-10-16 21:44:50,249 [INFO    ] [16/68] Evaluating: pubmed_253...
+2026-10-16 21:44:50,249 [INFO    ]   🚀 VAULT HIT: Copiando desde 167ffe1d8081d14e0ad6e140e290318f911e3dcf.pdf
+2026-10-16 21:44:50,249 [INFO    ] [17/68] Evaluating: pubmed_83...
+2026-10-16 21:44:50,249 [INFO    ]   🚀 VAULT HIT: Copiando desde 6d0557d8770595b25e08f83e69ce1dea4b006abc.pdf
+2026-10-16 21:44:50,250 [INFO    ] [18/68] Evaluating: pubmed_39...
+2026-10-16 21:44:50,250 [INFO    ]   🚀 VAULT HIT: Copiando desde 43a0f6b374dc78b3fc35540042c03d369a78d185.pdf
+2026-10-16 21:44:50,251 [INFO    ] [19/68] Evaluating: pubmed_100...
+2026-10-16 21:44:50,251 [INFO    ]   🚀 VAULT HIT: Copiando desde a0648773349664d56762ade5d49d9efb6b0be5f2.pdf
+2026-10-16 21:44:50,255 [INFO    ] [20/68] Evaluating: pubmed_246...
+2026-10-16 21:44:50,255 [INFO    ]   🚀 VAULT HIT: Copiando desde af57265973a47ca65f40aed7092398eb2dcb44a5.pdf
+2026-10-16 21:44:50,257 [INFO    ] [21/68] Evaluating: pubmed_36...
+2026-10-16 21:44:50,257 [INFO    ]   🚀 VAULT HIT: Copiando desde 596ac9f1fa29a55d3dd0d9617541accc3f362033.pdf
+2026-10-16 21:44:50,296 [INFO    ] [22/68] Evaluating: pubmed_210...
+2026-10-16 21:44:50,296 [INFO    ]   🚀 VAULT HIT: Copiando desde 58a7c9b039d99e3f024e7991cfb38767d34bc74e.pdf
+2026-10-16 21:44:50,298 [INFO    ] [23/68] Evaluating: ieee_328...
+2026-10-16 21:44:50,298 [INFO    ]   🚀 VAULT HIT: Copiando desde e4e8e18cc7017d1b1523dd696694cd88df850b49.pdf
+2026-10-16 21:44:50,299 [INFO    ] [24/68] Evaluating: ieee_131...
+2026-10-16 21:44:50,299 [INFO    ]   🚀 VAULT HIT: Copiando desde aa42231c8d13250c0fa602051edae5bde89c4546.pdf
+2026-10-16 21:44:50,300 [INFO    ] [25/68] Evaluating: ieee_366...
+2026-10-16 21:44:50,300 [INFO    ]   🚀 VAULT HIT: Copiando desde f38fbfac9c23cbac91d2d3c9e9357ff2bee45b9c.pdf
+2026-10-16 21:44:50,301 [INFO    ] [26/68] Evaluating: pubmed_248...
+2026-10-16 21:44:50,301 [INFO    ]   🚀 VAULT HIT: Copiando desde 01b8e789e9efa9569c11fe4d6d8e8a8491bb9bce.pdf
+2026-10-16 21:44:50,301 [INFO    ] [27/68] Evaluating: ieee_60...
+2026-10-16 21:44:50,301 [INFO    ]   🚀 VAULT HIT: Copiando desde 67f4e07b5187039d997d56d30bbd61ea5ccb1581.pdf
+2026-10-16 21:44:50,302 [INFO    ] [28/68] Evaluating: ieee_53...
+2026-10-16 21:44:50,302 [INFO    ]   🚀 VAULT HIT: Copiando desde fd4d982b2251a4fd08dc0a323dc396c82bb4d36c.pdf
+2026-10-16 21:44:50,319 [INFO    ] [29/68] Evaluating: pubmed_232...
+2026-10-16 21:44:50,319 [INFO    ]   🚀 VAULT HIT: Copiando desde 974499fb7dc3dd14b1b0084717d05ebfa6629309.pdf
+2026-10-16 21:44:50,322 [INFO    ] [30/68] Evaluating: ieee_63...
+2026-10-16 21:44:50,322 [INFO    ]   🚀 VAULT HIT: Copiando desde 8ea3c7fd16cc7b58a561bc40632f886a53517168.pdf
+2026-10-16 21:44:50,323 [INFO    ] [31/68] Evaluating: pubmed_227...
+2026-10-16 21:44:50,323 [INFO    ]   🚀 VAULT HIT: Copiando desde d50b7a04ac6ebcea3a00aebd6ccca266a4d4d942.pdf
+2026-10-16 21:44:50,323 [INFO    ] [32/68] Evaluating: ieee_72...
+2026-10-16 21:44:50,323 [INFO    ]   🚀 VAULT HIT: Copiando desde d35a1312722cce702c73e007024ca20747ecfc5d.pdf
+2026-10-16 21:44:50,324 [INFO    ] [33/68] Evaluating: ieee_12...
+2026-10-16 21:44:50,324 [INFO    ]   🚀 VAULT HIT: Copiando desde 0192b138f9dfaede576bab3aac185a7ecfa587de.pdf
+2026-10-16 21:44:50,326 [INFO    ] [34/68] Evaluating: pubmed_229...
+2026-10-16 21:44:50,326 [INFO    ]   🚀 VAULT HIT: Copiando desde 076f8e6b7ff9c0f61562a82f4f98265358e5ad9d.pdf
+2026-10-16 21:44:50,326 [INFO    ] [35/68] Evaluating: ieee_16...
+2026-10-16 21:44:50,326 [INFO    ]   🚀 VAULT HIT: Copiando desde 0a6e68bbf70ae30dbc220a94b62de4b55a400756.pdf
+2026-10-16 21:44:50,354 [INFO    ] [36/68] Evaluating: pubmed_107...
+2026-10-16 21:44:50,355 [INFO    ]   🚀 VAULT HIT: Copiando desde 384720ea157557efecf6030b81e59062cb38b5dc.pdf
+2026-10-16 21:44:50,355 [INFO    ] [37/68] Evaluating: ieee_77...
+2026-10-16 21:44:50,356 [INFO    ]   🚀 VAULT HIT: Copiando desde b80af46b46b918e6c89d0ecfe3710ce9939440ac.pdf
+2026-10-16 21:44:50,357 [INFO    ] [38/68] Evaluating: ieee_24...
+2026-10-16 21:44:50,357 [INFO    ]   🚀 VAULT HIT: Copiando desde 7d32f7edbb97150ae7da1720145e5f49e34d7d87.pdf
+2026-10-16 21:44:50,359 [INFO    ] [39/68] Evaluating: pubmed_77...
+2026-10-16 21:44:50,359 [INFO    ]   🚀 VAULT HIT: Copiando desde d628aecf204ee623e24c5fe50048a0c4fd0beccc.pdf
+2026-10-16 21:44:50,361 [INFO    ] [40/68] Evaluating: ieee_82...
+2026-10-16 21:44:50,361 [INFO    ]   🚀 VAULT HIT: Copiando desde eb50f5d9d44be290460c2cb4391c3e799e9ced8e.pdf
+2026-10-16 21:44:50,362 [INFO    ] [41/68] Evaluating: pubmed_17...
+2026-10-16 21:44:50,362 [INFO    ]   🚀 VAULT HIT: Copiando desde 3398d6a3484e2383120f4f19c533e0ada36c2c2b.pdf
+2026-10-16 21:44:50,363 [INFO    ] [42/68] Evaluating: ieee_325...
+2026-10-16 21:44:50,363 [INFO    ]   🚀 VAULT HIT: Copiando desde b496c0eef9cef643b973aea7e7339da5596d289f.pdf
+2026-10-16 21:44:50,364 [INFO    ] [43/68] Evaluating: pubmed_19...
+2026-10-16 21:44:50,365 [INFO    ]   🚀 VAULT HIT: Copiando desde 97fec1f1ba933d387f3bdd53d7ca7437cbd9eafe.pdf
+2026-10-16 21:44:50,365 [INFO    ] [44/68] Evaluating: ieee_19...
+2026-10-16 21:44:50,366 [INFO    ]   🚀 VAULT HIT: Copiando desde af009c213755bae6bdf38c499f3d6791899339a7.pdf
+2026-10-16 21:44:50,366 [INFO    ] [45/68] Evaluating: ieee_197...
+2026-10-16 21:44:50,366 [INFO    ]   🚀 VAULT HIT: Copiando desde 9fba1b353f8eb61eb0607d80e00f965a8e4622be.pdf
+2026-10-16 21:44:50,368 [INFO    ] [46/68] Evaluating: ieee_161...
+2026-10-16 21:44:50,368 [INFO    ]   🚀 VAULT HIT: Copiando desde 8499d6864465798a49ee955a9aba3b484cc9227b.pdf
+2026-10-16 21:44:50,369 [INFO    ] [47/68] Evaluating: pubmed_225...
+2026-10-16 21:44:50,369 [INFO    ]   🚀 VAULT HIT: Copiando desde 24be2904bddee8da4cbd7fa614d7aef7384a9073.pdf
+2026-10-16 21:44:50,409 [INFO    ] [48/68] Evaluating: pubmed_56...
+2026-10-16 21:44:50,409 [INFO    ]   🚀 VAULT HIT: Copiando desde 5859cdef45edcc6ebcdf6164226e70e90f4ae94b.pdf
+2026-10-16 21:44:50,410 [INFO    ] [49/68] Evaluating: ieee_337...
+2026-10-16 21:44:50,410 [INFO    ]   🚀 VAULT HIT: Copiando desde 37e095ddcf6b94eb947f1818a063188939c931a7.pdf
+2026-10-16 21:44:50,412 [INFO    ] [50/68] Evaluating: ieee_124...
+2026-10-16 21:44:50,412 [INFO    ]   🚀 VAULT HIT: Copiando desde c3aefa0546cff4519cfd3315b1f395997d167f35.pdf
+2026-10-16 21:44:50,430 [INFO    ] [51/68] Evaluating: pubmed_211...
+2026-10-16 21:44:50,430 [INFO    ]   🚀 VAULT HIT: Copiando desde aa71c2c9c038087230dec5be7349919e279bdef8.pdf
+2026-10-16 21:44:50,431 [INFO    ] [52/68] Evaluating: ieee_217...
+2026-10-16 21:44:50,431 [INFO    ]   🚀 VAULT HIT: Copiando desde b3f24917b7d9fc4ee80fd25f2d7429fad5c113f5.pdf
+2026-10-16 21:44:50,431 [INFO    ] [53/68] Evaluating: ieee_20...
+2026-10-16 21:44:50,431 [INFO    ]   🚀 VAULT HIT: Copiando desde b5e1255e6f91f264327a93833c957b0877aafc55.pdf
+2026-10-16 21:44:50,432 [INFO    ] [54/68] Evaluating: pubmed_16...
+2026-10-16 21:44:50,432 [INFO    ]   🚀 VAULT HIT: Copiando desde 0cb93f4ad3e03788a5228f71d31f0aabe344ec37.pdf
+2026-10-16 21:44:50,433 [INFO    ] [55/68] Evaluating: pubmed_467...
+2026-10-16 21:44:50,433 [INFO    ]   🚀 VAULT HIT: Copiando desde 41b427c602501879340e1c383b1669f94c59e24b.pdf
+2026-10-16 21:44:50,453 [INFO    ] [56/68] Evaluating: pubmed_290...
+2026-10-16 21:44:50,453 [INFO    ]   🚀 VAULT HIT: Copiando desde f1dd794d641f31bdc783d4512e725f28d46f1061.pdf
+2026-10-16 21:44:50,454 [INFO    ] [57/68] Evaluating: ieee_267...
+2026-10-16 21:44:50,454 [INFO    ]   🚀 VAULT HIT: Copiando desde cf4e4ff1d7981a51283c4cdc28e8384a3d08d0cf.pdf
+2026-10-16 21:44:50,455 [INFO    ] [58/68] Evaluating: pubmed_133...
+2026-10-16 21:44:50,455 [INFO    ]   🚀 VAULT HIT: Copiando desde dd719661b927243343d8c94d6facaa5d03fa7275.pdf
+2026-10-16 21:44:50,457 [INFO    ] [59/68] Evaluating: ieee_18...
+2026-10-16 21:44:50,457 [INFO    ]   🚀 VAULT HIT: Copiando desde 4c2cd31c1fe88c9b352bbbee9662c46faa7d8813.pdf
+2026-10-16 21:44:50,458 [INFO    ] [60/68] Evaluating: pubmed_60...
+2026-10-16 21:44:50,458 [INFO    ]   🚀 VAULT HIT: Copiando desde d4cfbed15c1c3611a669ff35fb9936756311b038.pdf
+2026-10-16 21:44:50,492 [INFO    ] [61/68] Evaluating: ieee_180...
+2026-10-16 21:44:50,492 [INFO    ]   🚀 VAULT HIT: Copiando desde 1f4777628bfbfb9b2d81a735cffb8e42642d6576.pdf
+2026-10-16 21:44:50,493 [INFO    ] [62/68] Evaluating: pubmed_138...
+2026-10-16 21:44:50,493 [INFO    ]   🚀 VAULT HIT: Copiando desde 3229fec11b28a64b36b448f92ff71e2bdd2e46cd.pdf
+2026-10-16 21:44:50,494 [INFO    ] [63/68] Evaluating: pubmed_28...
+2026-10-16 21:44:50,494 [INFO    ] Direct URL failed/missing. Triggering resolution cascade...
+2026-10-16 21:44:53,820 [WARNING ]   ❌ Automatización fallida. Iniciando recuperación manual...
+2026-10-16 21:44:53,820 [WARNING ] 📄 PAPELERA DE RECUPERACIÓN MANUAL [63/68]
+2026-10-16 21:45:53,843 [WARNING ] [Adquisition] Entorno no interactivo detectado. Omitiendo PDF manual para pubmed_28.
+2026-10-16 21:45:53,843 [INFO    ] [64/68] Evaluating: ieee_249...
+2026-10-16 21:45:53,843 [INFO    ]   🚀 VAULT HIT: Copiando desde a46bf1eb7015de4552510cda699014b84206303f.pdf
+2026-10-16 21:45:53,845 [INFO    ] [65/68] Evaluating: ieee_58...
+2026-10-16 21:45:53,845 [INFO    ]   🚀 VAULT HIT: Copiando desde 564c9eeea7af0dc78af058daf4622d2a42e93360.pdf
+2026-10-16 21:45:53,846 [INFO    ] [66/68] Evaluating: ieee_6...
+2026-10-16 21:45:53,846 [INFO    ]   🚀 VAULT HIT: Copiando desde 9ee05232d64ce548c522ba5ff3c498e19818a664.pdf
+2026-10-16 21:45:53,846 [INFO    ] [67/68] Evaluating: pubmed_289...
+2026-10-16 21:45:53,846 [INFO    ]   🚀 VAULT HIT: Copiando desde ccd057071e9cf0a18a34d945026aab995b85b300.pdf
+2026-10-16 21:45:53,847 [INFO    ] [68/68] Evaluating: pubmed_329...
+2026-10-16 21:45:53,847 [INFO    ]   🚀 VAULT HIT: Copiando desde 804591721b82a78776ebecd500d46f6acf7d5773.pdf
+2026-10-16 21:45:53,848 [INFO    ] 🗂️  Índice paper_id -> PDF guardado en /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdf_download_log.json (64 entradas)
+2026-10-16 21:45:53,850 [INFO    ] ✅ Estado del pipeline guardado en /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/selected_acquired.json
+2026-10-16 21:45:53,894 [INFO    ] 
+======================================================================
+2026-10-16 21:45:53,894 [INFO    ] PROCESO DE ADQUISICIÓN DE PDFs COMPLETADO
+2026-10-16 21:45:53,894 [INFO    ] ======================================================================
+2026-10-16 21:45:53,894 [INFO    ]   🚀 Copiados desde Vault (Cache Hit): 64
+2026-10-16 21:45:53,894 [INFO    ]   ✅ Descargados nuevos (Auto): 0
+2026-10-16 21:45:53,894 [INFO    ]   🔄 Recuperados manualmente: 0
+2026-10-16 21:45:53,894 [INFO    ]   ❌ PDFs faltantes (final): 4
+2026-10-16 21:45:53,894 [INFO    ] ✅ [END] processAcquisitionEngine
+2026-10-16 21:45:53,896 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:45:53,896 [INFO    ] 🚀 [START] Processing processCorpusCleaning
+2026-10-16 21:45:53,897 [INFO    ] [CLEAN] Leídos 68 papers de selected_acquired.json
+2026-10-16 21:45:53,897 [INFO    ] [CLEAN] Índice de PDFs cargado: 64 entradas
+2026-10-16 21:45:53,897 [INFO    ] [ieee_86] Extrayendo y limpiando...
+2026-10-16 21:45:56,939 [INFO    ] [FullText] 7 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_86.pdf
+2026-10-16 21:45:56,964 [INFO    ] [ieee_86] 7 captions de tablas/figuras añadidos como sección
+2026-10-16 21:45:56,965 [INFO    ] [ieee_25] Extrayendo y limpiando...
+2026-10-16 21:45:57,887 [INFO    ] [FullText] 10 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_25.pdf
+2026-10-16 21:45:57,913 [INFO    ] [ieee_25] 10 captions de tablas/figuras añadidos como sección
+2026-10-16 21:45:57,914 [INFO    ] [ieee_296] Extrayendo y limpiando...
+2026-10-16 21:45:58,925 [INFO    ] [FullText] 11 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_296.pdf
+2026-10-16 21:45:58,945 [INFO    ] [ieee_296] 11 captions de tablas/figuras añadidos como sección
+2026-10-16 21:45:58,946 [INFO    ] [pubmed_270] Extrayendo y limpiando...
+2026-10-16 21:46:00,471 [INFO    ] [FullText] 7 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_270.pdf
+2026-10-16 21:46:00,500 [INFO    ] [pubmed_270] 7 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:00,501 [INFO    ] [pubmed_216] Extrayendo y limpiando...
+2026-10-16 21:46:01,196 [INFO    ] [pubmed_2] Extrayendo y limpiando...
+2026-10-16 21:46:07,533 [INFO    ] [FullText] 1 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_2.pdf
+2026-10-16 21:46:07,562 [INFO    ] [pubmed_2] 1 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:07,562 [INFO    ] [pubmed_8] Extrayendo y limpiando...
+2026-10-16 21:46:08,759 [INFO    ] [FullText] 5 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_8.pdf
+2026-10-16 21:46:08,799 [INFO    ] [pubmed_8] 5 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:08,800 [INFO    ] [pubmed_30] Extrayendo y limpiando...
+2026-10-16 21:46:14,381 [INFO    ] [FullText] 11 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_30.pdf
+2026-10-16 21:46:14,429 [INFO    ] [pubmed_30] 11 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:14,430 [INFO    ] [pubmed_80] Extrayendo y limpiando...
+2026-10-16 21:46:21,180 [INFO    ] [FullText] 13 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_80.pdf
+2026-10-16 21:46:21,230 [INFO    ] [pubmed_80] 13 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:21,230 [INFO    ] [pubmed_188] Extrayendo y limpiando...
+2026-10-16 21:46:22,020 [INFO    ] [FullText] 8 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_188.pdf
+2026-10-16 21:46:22,045 [INFO    ] [pubmed_188] 8 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:22,045 [INFO    ] [pubmed_154] Extrayendo y limpiando...
+2026-10-16 21:46:22,881 [INFO    ] [FullText] 7 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_154.pdf
+2026-10-16 21:46:22,902 [INFO    ] [pubmed_154] 7 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:22,902 [INFO    ] [ieee_52] Extrayendo y limpiando...
+2026-10-16 21:46:23,614 [INFO    ] [FullText] 4 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_52.pdf
+2026-10-16 21:46:23,630 [INFO    ] [ieee_52] 4 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:23,630 [INFO    ] [pubmed_253] Extrayendo y limpiando...
+2026-10-16 21:46:25,283 [INFO    ] [FullText] 2 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_253.pdf
+2026-10-16 21:46:25,311 [INFO    ] [pubmed_253] 2 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:25,311 [INFO    ] [pubmed_83] Extrayendo y limpiando...
+2026-10-16 21:46:26,820 [INFO    ] [FullText] 2 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_83.pdf
+2026-10-16 21:46:26,853 [INFO    ] [pubmed_83] 2 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:26,854 [INFO    ] [pubmed_39] Extrayendo y limpiando...
+2026-10-16 21:46:28,257 [INFO    ] [FullText] 10 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_39.pdf
+2026-10-16 21:46:28,298 [INFO    ] [pubmed_39] 10 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:28,299 [INFO    ] [pubmed_100] Extrayendo y limpiando...
+2026-10-16 21:46:31,390 [INFO    ] [FullText] 9 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_100.pdf
+2026-10-16 21:46:31,465 [INFO    ] [pubmed_100] 9 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:31,466 [INFO    ] [pubmed_246] Extrayendo y limpiando...
+2026-10-16 21:46:32,610 [INFO    ] [FullText] 4 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_246.pdf
+2026-10-16 21:46:32,646 [INFO    ] [pubmed_246] 4 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:32,647 [INFO    ] [pubmed_36] Extrayendo y limpiando...
+2026-10-16 21:46:35,380 [INFO    ] [FullText] 22 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_36.pdf
+2026-10-16 21:46:35,426 [INFO    ] [pubmed_36] 22 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:35,426 [INFO    ] [pubmed_210] Extrayendo y limpiando...
+2026-10-16 21:46:36,986 [INFO    ] [FullText] 7 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_210.pdf
+2026-10-16 21:46:37,019 [INFO    ] [pubmed_210] 7 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:37,020 [INFO    ] [ieee_328] Extrayendo y limpiando...
+2026-10-16 21:46:37,944 [INFO    ] [FullText] 3 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_328.pdf
+2026-10-16 21:46:37,957 [INFO    ] [ieee_328] 3 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:37,958 [INFO    ] [ieee_131] Extrayendo y limpiando...
+2026-10-16 21:46:40,614 [INFO    ] [FullText] 22 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_131.pdf
+2026-10-16 21:46:40,668 [INFO    ] [ieee_131] 22 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:40,669 [INFO    ] [ieee_366] Extrayendo y limpiando...
+2026-10-16 21:46:41,300 [INFO    ] [FullText] 2 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_366.pdf
+2026-10-16 21:46:41,309 [INFO    ] [ieee_366] 2 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:41,309 [INFO    ] [pubmed_248] Extrayendo y limpiando...
+2026-10-16 21:46:42,183 [INFO    ] [FullText] 1 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_248.pdf
+2026-10-16 21:46:42,206 [INFO    ] [pubmed_248] 1 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:42,206 [INFO    ] [ieee_60] Extrayendo y limpiando...
+2026-10-16 21:46:43,125 [INFO    ] [FullText] 8 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_60.pdf
+2026-10-16 21:46:43,148 [INFO    ] [ieee_60] 8 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:43,148 [INFO    ] [ieee_53] Extrayendo y limpiando...
+2026-10-16 21:46:44,039 [INFO    ] [FullText] 4 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_53.pdf
+2026-10-16 21:46:44,051 [INFO    ] [ieee_53] 4 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:44,051 [INFO    ] [pubmed_232] Extrayendo y limpiando...
+2026-10-16 21:46:47,265 [INFO    ] [FullText] 12 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_232.pdf
+2026-10-16 21:46:47,328 [INFO    ] [pubmed_232] 12 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:47,328 [INFO    ] [ieee_63] Extrayendo y limpiando...
+2026-10-16 21:46:47,938 [INFO    ] [FullText] 4 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_63.pdf
+2026-10-16 21:46:47,951 [INFO    ] [ieee_63] 4 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:47,952 [INFO    ] [pubmed_227] Extrayendo y limpiando...
+2026-10-16 21:46:48,899 [INFO    ] [FullText] 6 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_227.pdf
+2026-10-16 21:46:48,931 [INFO    ] [pubmed_227] 6 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:48,931 [INFO    ] [ieee_72] Extrayendo y limpiando...
+2026-10-16 21:46:49,831 [INFO    ] [FullText] 2 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_72.pdf
+2026-10-16 21:46:49,848 [INFO    ] [ieee_72] 2 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:49,848 [INFO    ] [ieee_12] Extrayendo y limpiando...
+2026-10-16 21:46:51,513 [INFO    ] [FullText] 2 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_12.pdf
+2026-10-16 21:46:51,545 [INFO    ] [ieee_12] 2 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:51,546 [INFO    ] [pubmed_229] Extrayendo y limpiando...
+2026-10-16 21:46:52,905 [INFO    ] [FullText] 2 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_229.pdf
+2026-10-16 21:46:52,919 [INFO    ] [pubmed_229] 2 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:52,919 [INFO    ] [ieee_16] Extrayendo y limpiando...
+2026-10-16 21:46:53,761 [INFO    ] [FullText] 3 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_16.pdf
+2026-10-16 21:46:53,776 [INFO    ] [ieee_16] 3 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:53,776 [INFO    ] [pubmed_107] Extrayendo y limpiando...
+2026-10-16 21:46:54,619 [INFO    ] [ieee_77] Extrayendo y limpiando...
+2026-10-16 21:46:55,819 [INFO    ] [FullText] 5 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_77.pdf
+2026-10-16 21:46:55,837 [INFO    ] [ieee_77] 5 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:55,837 [INFO    ] [ieee_24] Extrayendo y limpiando...
+2026-10-16 21:46:56,512 [INFO    ] [FullText] 5 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_24.pdf
+2026-10-16 21:46:56,527 [INFO    ] [ieee_24] 5 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:56,527 [INFO    ] [pubmed_77] Extrayendo y limpiando...
+2026-10-16 21:46:58,513 [INFO    ] [FullText] 15 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_77.pdf
+2026-10-16 21:46:58,582 [INFO    ] [pubmed_77] 15 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:58,582 [INFO    ] [ieee_82] Extrayendo y limpiando...
+2026-10-16 21:46:59,111 [INFO    ] [FullText] 5 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_82.pdf
+2026-10-16 21:46:59,125 [INFO    ] [ieee_82] 5 captions de tablas/figuras añadidos como sección
+2026-10-16 21:46:59,125 [INFO    ] [pubmed_17] Extrayendo y limpiando...
+2026-10-16 21:47:00,389 [INFO    ] [FullText] 5 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_17.pdf
+2026-10-16 21:47:00,408 [INFO    ] [pubmed_17] 5 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:00,408 [INFO    ] [ieee_325] Extrayendo y limpiando...
+2026-10-16 21:47:01,127 [INFO    ] [FullText] 1 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_325.pdf
+2026-10-16 21:47:01,142 [INFO    ] [ieee_325] 1 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:01,142 [INFO    ] [pubmed_19] Extrayendo y limpiando...
+2026-10-16 21:47:02,333 [INFO    ] [FullText] 14 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_19.pdf
+2026-10-16 21:47:02,357 [INFO    ] [pubmed_19] 14 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:02,357 [INFO    ] [ieee_19] Extrayendo y limpiando...
+2026-10-16 21:47:05,367 [INFO    ] [FullText] 11 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_19.pdf
+2026-10-16 21:47:05,404 [INFO    ] [ieee_19] 11 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:05,404 [INFO    ] [ieee_197] Extrayendo y limpiando...
+2026-10-16 21:47:07,770 [INFO    ] [FullText] 7 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_197.pdf
+2026-10-16 21:47:07,815 [INFO    ] [ieee_197] 7 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:07,816 [INFO    ] [ieee_161] Extrayendo y limpiando...
+2026-10-16 21:47:09,855 [INFO    ] [FullText] 12 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_161.pdf
+2026-10-16 21:47:09,883 [INFO    ] [ieee_161] 12 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:09,883 [INFO    ] [pubmed_225] Extrayendo y limpiando...
+2026-10-16 21:47:10,612 [INFO    ] [FullText] 17 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_225.pdf
+2026-10-16 21:47:10,635 [INFO    ] [pubmed_225] 17 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:10,635 [INFO    ] [pubmed_56] Extrayendo y limpiando...
+2026-10-16 21:47:12,221 [INFO    ] [ieee_337] Extrayendo y limpiando...
+2026-10-16 21:47:16,274 [INFO    ] [FullText] 10 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_337.pdf
+2026-10-16 21:47:16,325 [INFO    ] [ieee_337] 10 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:16,325 [INFO    ] [ieee_124] Extrayendo y limpiando...
+2026-10-16 21:47:24,017 [INFO    ] [FullText] 35 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_124.pdf
+2026-10-16 21:47:24,088 [INFO    ] [ieee_124] 35 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:24,088 [INFO    ] [pubmed_211] Extrayendo y limpiando...
+2026-10-16 21:47:25,219 [INFO    ] [FullText] 5 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_211.pdf
+2026-10-16 21:47:25,231 [INFO    ] [pubmed_211] 5 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:25,232 [INFO    ] [ieee_217] Extrayendo y limpiando...
+2026-10-16 21:47:25,941 [INFO    ] [FullText] 7 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_217.pdf
+2026-10-16 21:47:25,955 [INFO    ] [ieee_217] 7 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:25,955 [INFO    ] [ieee_20] Extrayendo y limpiando...
+2026-10-16 21:47:28,050 [INFO    ] [FullText] 4 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_20.pdf
+2026-10-16 21:47:28,089 [INFO    ] [ieee_20] 4 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:28,089 [INFO    ] [pubmed_16] Extrayendo y limpiando...
+2026-10-16 21:47:28,786 [INFO    ] [FullText] 3 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_16.pdf
+2026-10-16 21:47:28,799 [INFO    ] [pubmed_16] 3 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:28,799 [INFO    ] [pubmed_467] Extrayendo y limpiando...
+2026-10-16 21:47:29,902 [INFO    ] [FullText] 3 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_467.pdf
+2026-10-16 21:47:29,935 [INFO    ] [pubmed_467] 3 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:29,935 [INFO    ] [pubmed_290] Extrayendo y limpiando...
+2026-10-16 21:47:31,264 [INFO    ] [FullText] 1 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_290.pdf
+2026-10-16 21:47:31,284 [INFO    ] [pubmed_290] 1 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:31,284 [INFO    ] [ieee_267] Extrayendo y limpiando...
+2026-10-16 21:47:32,021 [INFO    ] [FullText] 8 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_267.pdf
+2026-10-16 21:47:32,041 [INFO    ] [ieee_267] 8 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:32,041 [INFO    ] [pubmed_133] Extrayendo y limpiando...
+2026-10-16 21:47:34,221 [INFO    ] [FullText] 10 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_133.pdf
+2026-10-16 21:47:34,262 [INFO    ] [pubmed_133] 10 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:34,262 [INFO    ] [ieee_18] Extrayendo y limpiando...
+2026-10-16 21:47:34,764 [INFO    ] [FullText] 2 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_18.pdf
+2026-10-16 21:47:34,774 [INFO    ] [ieee_18] 2 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:34,774 [INFO    ] [pubmed_60] Extrayendo y limpiando...
+2026-10-16 21:47:36,460 [INFO    ] [FullText] 10 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_60.pdf
+2026-10-16 21:47:36,495 [INFO    ] [pubmed_60] 10 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:36,496 [INFO    ] [ieee_180] Extrayendo y limpiando...
+2026-10-16 21:47:37,107 [INFO    ] [FullText] 4 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_180.pdf
+2026-10-16 21:47:37,119 [INFO    ] [ieee_180] 4 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:37,119 [INFO    ] [pubmed_138] Extrayendo y limpiando...
+
+======================================================================
+======================================================================
+
+Paper ID: pubmed_217
+Título: A bimodal large language model reduces misalignment in patient education: A double-blinded randomized trial.
+DOI: 10.1016/j.medj.2026.101263
+Landing page: https://doi.org/10.1016/j.medj.2026.101263
+🔍 Google Scholar: https://scholar.google.com/scholar?hl=en&as_sdt=0%2C5&q=T%C3%ADtulo%3A%20A%20bimodal%20large%20language%20model%20reduces%20misalignment%20in%20patient%20education%3A%20A%20double-blinded%20randomized%20trial.%20DOI%3A%2010.1016/j.medj.2026.101263&btnG=
+
+----------------------------------------------------------------------
+📌 Opciones:
+   Y = Incorporar PDF manualmente
+   N = Omitir
+   F = Finalizar
+
+⏳ Esperando 60s para detectar PDF en la carpeta manual automático...
+   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s
+
+⏰ Tiempo de espera automática finalizado.
+
+
+======================================================================
+======================================================================
+
+Paper ID: pubmed_14
+Título: The potential of Generative Pre-trained Transformer 4 (GPT-4) to analyse medical notes in three different languages: a retrospective model-evaluation study.
+DOI: 10.1016/s2589-7500(24)00246-2
+Landing page: https://doi.org/10.1016/S2589-7500(24)00246-2
+PDF URL: https://doi.org/10.1016/s2589-7500(24)00246-2
+
+----------------------------------------------------------------------
+📌 Opciones:
+   Y = Incorporar PDF manualmente
+   N = Omitir
+   F = Finalizar
+
+⏳ Esperando 60s para detectar PDF en la carpeta manual automático...
+   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s
+
+⏰ Tiempo de espera automática finalizado.
+
+
+======================================================================
+======================================================================
+
+Paper ID: pubmed_113
+Título: Physiological and Perceptual Responses of a Guard Passing Test and a Simulated Brazilian Jiu-Jitsu Combat: A Pilot Study.
+DOI: 10.1519/jsc.0000000000004865
+Landing page: https://doi.org/10.1519/JSC.0000000000004865
+🔍 Google Scholar: https://scholar.google.com/scholar?hl=en&as_sdt=0%2C5&q=T%C3%ADtulo%3A%20Physiological%20and%20Perceptual%20Responses%20of%20a%20Guard%20Passing%20Test%20and%20a%20Simulated%20Brazilian%20Jiu-Jitsu%20Combat%3A%20A%20Pilot%20Study.%20DOI%3A%2010.1519/jsc.0000000000004865&btnG=
+
+----------------------------------------------------------------------
+📌 Opciones:
+   Y = Incorporar PDF manualmente
+   N = Omitir
+   F = Finalizar
+
+⏳ Esperando 60s para detectar PDF en la carpeta manual automático...
+   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s
+
+⏰ Tiempo de espera automática finalizado.
+
+
+======================================================================
+======================================================================
+
+Paper ID: pubmed_28
+Título: CMA-ECG: cross-modal attention for enhanced ECG quality assessment and denoising.
+DOI: 10.1088/1361-6579/ae15e4
+Landing page: https://doi.org/10.1088/1361-6579/ae15e4
+🔍 Google Scholar: https://scholar.google.com/scholar?hl=en&as_sdt=0%2C5&q=T%C3%ADtulo%3A%20CMA-ECG%3A%20cross-modal%20attention%20for%20enhanced%20ECG%20quality%20assessment%20and%20denoising.%20DOI%3A%2010.1088/1361-6579/ae15e4&btnG=
+
+----------------------------------------------------------------------
+📌 Opciones:
+   Y = Incorporar PDF manualmente
+   N = Omitir
+   F = Finalizar
+
+⏳ Esperando 60s para detectar PDF en la carpeta manual automático...
+   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 10s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 20s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 30s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 40s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s   Esperando... 50s
+
+⏰ Tiempo de espera automática finalizado.
+
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+MuPDF error: format error: No common ancestor in structure tree
+
+MuPDF error: format error: No common ancestor in structure tree
+
+MuPDF error: format error: No common ancestor in structure tree
+
+MuPDF error: format error: No common ancestor in structure tree
+
+MuPDF error: format error: No common ancestor in structure tree
+
+MuPDF error: format error: No common ancestor in structure tree
+
+2026-10-16 21:47:38,072 [INFO    ] [FullText] 6 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_138.pdf
+2026-10-16 21:47:38,086 [INFO    ] [pubmed_138] 6 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:38,086 [INFO    ] [ieee_249] Extrayendo y limpiando...
+2026-10-16 21:47:40,397 [INFO    ] [FullText] 13 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_249.pdf
+2026-10-16 21:47:40,429 [INFO    ] [ieee_249] 13 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:40,430 [INFO    ] [ieee_58] Extrayendo y limpiando...
+2026-10-16 21:47:40,715 [INFO    ] [FullText] 6 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_58.pdf
+2026-10-16 21:47:40,722 [INFO    ] [ieee_58] 6 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:40,722 [INFO    ] [ieee_6] Extrayendo y limpiando...
+2026-10-16 21:47:40,937 [INFO    ] [FullText] 1 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/ieee_6.pdf
+2026-10-16 21:47:40,941 [INFO    ] [ieee_6] 1 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:40,941 [INFO    ] [pubmed_289] Extrayendo y limpiando...
+2026-10-16 21:47:41,718 [INFO    ] [FullText] 11 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_289.pdf
+2026-10-16 21:47:41,743 [INFO    ] [pubmed_289] 11 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:41,743 [INFO    ] [pubmed_329] Extrayendo y limpiando...
+2026-10-16 21:47:42,739 [INFO    ] [FullText] 14 captions extraídos de /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/pdfs/pubmed_329.pdf
+2026-10-16 21:47:42,774 [INFO    ] [pubmed_329] 14 captions de tablas/figuras añadidos como sección
+2026-10-16 21:47:42,794 [INFO    ] ============================================================
+2026-10-16 21:47:42,794 [INFO    ] CORPUS CLEANING COMPLETED
+2026-10-16 21:47:42,794 [INFO    ] ============================================================
+2026-10-16 21:47:42,794 [INFO    ]   Procesados desde selected_acquired: 68
+2026-10-16 21:47:42,794 [INFO    ]   Descartados (sin PDF o texto corto): 0
+2026-10-16 21:47:42,794 [INFO    ]   papers_metadata.json: 64 registros válidos
+2026-10-16 21:47:42,794 [INFO    ]   papers_text.json: 64 registros válidos
+2026-10-16 21:47:42,794 [INFO    ]   Total palabras limpias: 176,056
+2026-10-16 21:47:42,795 [INFO    ]   Low quality (<500 palabras): 22
+2026-10-16 21:47:42,795 [INFO    ] ✅ [END] processCorpusCleaning
+2026-10-16 21:47:42,799 [INFO    ] 🚀 [START] Processing Argumentative Zoning
+2026-10-16 21:47:42,800 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:47:42,800 [INFO    ] 🚀 [START] Processing processArgumentativeZoning
+2026-10-16 21:47:42,822 [INFO    ] [AZ] Loaded 64 papers from papers_text.json
+2026-10-16 21:47:42,822 [INFO    ] 📄 JSON loaded from /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/papers_zoned.json
+2026-10-16 21:47:42,834 [INFO    ] [AZ] Loaded 71 existing zoned papers
+2026-10-16 21:47:42,844 [INFO    ] 💾 JSON written to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/papers_zoned.json
+2026-10-16 21:47:42,844 [INFO    ] ============================================================
+2026-10-16 21:47:42,844 [INFO    ] ARGUMENTATIVE ZONING COMPLETED
+2026-10-16 21:47:42,844 [INFO    ] ============================================================
+2026-10-16 21:47:42,844 [INFO    ]   Papers totales:      64
+2026-10-16 21:47:42,844 [INFO    ]   Procesados nuevos:   0
+2026-10-16 21:47:42,844 [INFO    ]   Ya existentes (skip): 64
+2026-10-16 21:47:42,844 [INFO    ]   Output:              /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/papers_zoned.json
+2026-10-16 21:47:42,844 [INFO    ]   Distribución zonas:
+2026-10-16 21:47:42,844 [INFO    ]     method: 108
+2026-10-16 21:47:42,844 [INFO    ]     evidence: 80
+2026-10-16 21:47:42,845 [INFO    ]     claim: 52
+2026-10-16 21:47:42,845 [INFO    ]     background: 26
+2026-10-16 21:47:42,845 [INFO    ]     gap: 16
+2026-10-16 21:47:42,845 [INFO    ]     rest: 13
+2026-10-16 21:47:42,845 [INFO    ]     future_work: 2
+2026-10-16 21:47:42,845 [INFO    ] ✅ [END] Argumentative Zoning
+2026-10-16 21:47:42,906 [INFO    ] 🚀 [START] Processing processStructureExtraction
+2026-10-16 21:47:42,906 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:47:42,906 [INFO    ] 🚀 [START] Processing processStructureExtraction
+2026-10-16 21:47:42,928 [INFO    ] [StructureExtraction] Loaded 64 papers from papers_text.json
+2026-10-16 21:47:42,928 [INFO    ] [StructureExtraction] LLM cache loaded: 0 entries
+2026-10-16 21:47:42,928 [INFO    ] 📄 JSON loaded from /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/papers_structured.json
+2026-10-16 21:47:42,986 [INFO    ] [StructureExtraction] Loaded 71 existing structured entries
+2026-10-16 21:47:42,989 [INFO    ] 💾 JSON written to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/papers_structured.json
+2026-10-16 21:47:42,989 [INFO    ] ============================================================
+2026-10-16 21:47:42,989 [INFO    ] STRUCTURE EXTRACTION COMPLETED
+2026-10-16 21:47:42,989 [INFO    ] ============================================================
+2026-10-16 21:47:42,989 [INFO    ]   Papers totales:      64
+2026-10-16 21:47:42,989 [INFO    ]   Procesados nuevos:   0
+2026-10-16 21:47:42,989 [INFO    ]   Ya existentes (skip): 64
+2026-10-16 21:47:42,989 [INFO    ]   Fallidos:            0
+2026-10-16 21:47:42,989 [INFO    ]   Output:              /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/papers_structured.json
+2026-10-16 21:47:42,989 [INFO    ] ✅ [END] processStructureExtraction
+2026-10-16 21:47:50,634 [INFO    ] [Discovery] Usando modelo fine-tuneado: /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/models/slip-sensores
+2026-10-16 21:47:50,634 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:47:50,634 [INFO    ] 🚀 [START] Processing processDiscoveryEngine
+2026-10-16 21:47:50,659 [INFO    ] [Discovery] Loaded 64 structured papers, merging...
+2026-10-16 21:47:50,659 [INFO    ] [Discovery] Merged structured data into 64 papers
+2026-10-16 21:47:50,660 [INFO    ] [Discovery] Loaded studyDescription.json: 6 objectives
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights:   7%|▋         | 13/199 [00:00<00:02, 66.40it/s]Loading weights:  14%|█▍        | 28/199 [00:00<00:02, 78.87it/s]Loading weights:  21%|██        | 42/199 [00:00<00:01, 88.72it/s]Loading weights:  29%|██▉       | 58/199 [00:00<00:01, 89.63it/s]Loading weights:  34%|███▍      | 68/199 [00:00<00:01, 82.46it/s]Loading weights:  39%|███▉      | 78/199 [00:00<00:01, 79.55it/s]Loading weights:  43%|████▎     | 86/199 [00:01<00:01, 74.67it/s]Loading weights:  47%|████▋     | 94/199 [00:01<00:01, 73.32it/s]Loading weights:  53%|█████▎    | 106/199 [00:01<00:01, 70.32it/s]Loading weights:  57%|█████▋    | 114/199 [00:01<00:01, 64.02it/s]Loading weights:  61%|██████    | 121/199 [00:01<00:01, 52.20it/s]Loading weights:  64%|██████▍   | 127/199 [00:01<00:01, 49.62it/s]Loading weights:  70%|███████   | 140/199 [00:02<00:01, 52.86it/s]Loading weights:  73%|███████▎  | 146/199 [00:02<00:00, 53.87it/s]Loading weights:  79%|███████▉  | 158/199 [00:02<00:00, 66.16it/s]Loading weights:  84%|████████▍ | 167/199 [00:02<00:00, 64.26it/s]Loading weights:  91%|█████████▏| 182/199 [00:02<00:00, 69.46it/s]Loading weights: 100%|██████████| 199/199 [00:02<00:00, 73.68it/s]
+2026-10-16 21:47:54,506 [INFO    ] [Factory] Qwen3 detected: bumping num_predict to 2000
+2026-10-16 21:48:08,800 [INFO    ] [Discovery] Study synthesis generated (247 words)
+2026-10-16 21:48:08,869 [INFO    ] [Discovery] Computing section-weighted global embeddings for 64 papers...
+2026-10-16 21:48:12,502 [INFO    ] [Discovery] Computed 64 section-weighted embeddings
+2026-10-16 21:48:12,502 [INFO    ] [Discovery] Starting Query-Driven Discovery for 6 Research Questions...
+2026-10-16 21:48:12,529 [INFO    ]   -> Hard filter matched 54 papers. Soft re-ranked to 43.
+2026-10-16 21:48:14,649 [INFO    ]   -> Sub-engine processing 195 chunks from 43 papers
+2026-10-16 21:48:32,580 [WARNING ] [Discovery] Dynamic threshold lowered 0.600 -> 0.592 to keep at least 2 valid topic(s)
+2026-10-16 21:48:32,597 [INFO    ]   -> Hard filter matched 53 papers. Soft re-ranked to 42.
+2026-10-16 21:48:34,625 [INFO    ]   -> Sub-engine processing 189 chunks from 42 papers
+2026-10-16 21:48:45,850 [WARNING ] [Discovery] Dynamic threshold lowered 0.600 -> 0.557 to keep at least 2 valid topic(s)
+2026-10-16 21:48:45,868 [INFO    ]   -> Hard filter matched 51 papers. Soft re-ranked to 40.
+2026-10-16 21:48:47,841 [INFO    ]   -> Sub-engine processing 182 chunks from 40 papers
+2026-10-16 21:48:58,598 [WARNING ] [Discovery] Dynamic threshold lowered 0.600 -> 0.541 to keep at least 2 valid topic(s)
+2026-10-16 21:48:58,616 [INFO    ]   -> Hard filter matched 52 papers. Soft re-ranked to 41.
+2026-10-16 21:49:00,617 [INFO    ]   -> Sub-engine processing 186 chunks from 41 papers
+2026-10-16 21:49:11,719 [WARNING ] [Discovery] Dynamic threshold lowered 0.600 -> 0.557 to keep at least 2 valid topic(s)
+2026-10-16 21:49:11,738 [INFO    ]   -> Hard filter matched 38 papers. Soft re-ranked to 30.
+2026-10-16 21:49:13,175 [INFO    ]   -> Sub-engine processing 138 chunks from 30 papers
+2026-10-16 21:49:20,978 [INFO    ]   -> Hard filter matched 54 papers. Soft re-ranked to 43.
+2026-10-16 21:49:23,090 [INFO    ]   -> Sub-engine processing 194 chunks from 43 papers
+2026-10-16 21:49:34,345 [INFO    ] [Discovery] Dedup de conceptos: 8 fusionados (12 -> 4, umbral=0.88)
+2026-10-16 21:49:34,500 [INFO    ] 
+============================================================
+2026-10-16 21:49:34,500 [INFO    ] [Discovery] SLR Query-Driven COMPLETED
+2026-10-16 21:49:34,500 [INFO    ] [Discovery] Merged Output: 4 unique clusters across all RQs
+2026-10-16 21:49:34,500 [INFO    ] ✅ [END] discoveryEngine
+2026-10-16 21:49:35,295 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:49:35,295 [INFO    ] 🚀 [START] Processing processConceptMiningEngine
+2026-10-16 21:49:35,295 [INFO    ] [ConceptMining] Building candidates...
+2026-10-16 21:49:35,380 [INFO    ] [ConceptMining] Loaded 112 focus terms
+2026-10-16 21:49:35,385 [INFO    ] [ConceptMining] Loaded 64 structured papers
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 17439.02it/s]
+2026-10-16 21:50:14,583 [INFO    ] [ConceptMining] Cargando modelo de embeddings para dedup semántica: BAAI/bge-base-en-v1.5
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 15353.01it/s]
+2026-10-16 21:50:17,191 [INFO    ] [ConceptMining] Dedup semántica: 30 términos → 28 (umbral=0.85)
+2026-10-16 21:50:17,191 [INFO    ] [ConceptMining] topic 0 'llm physiological series signal model physiologica' → 45 documents, 28 keywords
+2026-10-16 21:50:48,320 [INFO    ] [ConceptMining] Dedup semántica: 30 términos → 29 (umbral=0.85)
+2026-10-16 21:50:48,320 [INFO    ] [ConceptMining] topic 100 'study clinical accuracy prompt dataset task' → 42 documents, 29 keywords
+2026-10-16 21:50:52,428 [INFO    ] [ConceptMining] Dedup semántica: 30 términos → 27 (umbral=0.85)
+2026-10-16 21:50:52,428 [INFO    ] [ConceptMining] topic 102 'department computer science university detection h' → 8 documents, 27 keywords
+2026-10-16 21:51:14,560 [INFO    ] [ConceptMining] Dedup semántica: 30 términos → 27 (umbral=0.85)
+2026-10-16 21:51:14,560 [INFO    ] [ConceptMining] topic 201 'speech study task eeg dataset clinical' → 29 documents, 27 keywords
+2026-10-16 21:51:14,574 [INFO    ] [ConceptMining] Saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/concept_candidates.json
+2026-10-16 21:51:14,574 [INFO    ] [ConceptMining] 4 concept candidates written
+2026-10-16 21:51:14,574 [INFO    ] --- Conceptos generados ---
+2026-10-16 21:51:14,574 [INFO    ]   Concepto 0: 'llm physiological series signal model physiological signal' → 45 documentos
+2026-10-16 21:51:14,574 [INFO    ]   Concepto 100: 'study clinical accuracy prompt dataset task' → 42 documentos
+2026-10-16 21:51:14,574 [INFO    ]   Concepto 102: 'department computer science university detection hallucination comparable perfor' → 8 documentos
+2026-10-16 21:51:14,574 [INFO    ]   Concepto 201: 'speech study task eeg dataset clinical' → 29 documentos
+2026-10-16 21:51:14,574 [INFO    ] --- Fin de lista ---
+2026-10-16 21:51:14,607 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:51:14,607 [INFO    ] 🚀 [START] Processing processConceptAlignment
+2026-10-16 21:51:14,623 [INFO    ] [ConceptAlignment] Loaded 64 papers with titles
+2026-10-16 21:51:14,632 [INFO    ] [ConceptAlignment] Loaded 112 focus terms
+2026-10-16 21:51:14,632 [INFO    ] [ConceptAlignment] Loading embedding model BAAI/bge-base-en-v1.5
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 18478.75it/s]
+2026-10-16 21:51:17,331 [INFO    ] [ConceptAlignment] Encoding: ENHANCED (section-weighted)
+2026-10-16 21:51:19,838 [INFO    ] [ConceptAlignment] Fallback doc-level: 38 papers recuperados (umbral doc-concepto >= 0.45)
+2026-10-16 21:51:19,983 [INFO    ] [ConceptAlignment] Saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/aligned_concepts.json
+2026-10-16 21:51:19,983 [INFO    ] 
+================================================================================
+2026-10-16 21:51:19,983 [INFO    ] 📋 RESUMEN DE CONCEPTOS ALINEADOS
+2026-10-16 21:51:19,983 [INFO    ] ================================================================================
+2026-10-16 21:51:19,983 [INFO    ] 
+🔹 Concepto 0:
+2026-10-16 21:51:19,983 [INFO    ]    Pregunta: How are physiological and wearable sensor signals converted into inputs that a large language model can process, including numerical serialization, statistical summaries, signal plots for vision-language models, time-series tokenization, learned encoders or projectors, and retrieval-augmented representations?
+2026-10-16 21:51:19,983 [INFO    ]    📄 Documentos: 21 (Dinámico por calidad)
+2026-10-16 21:51:19,983 [INFO    ]    🆔 IDs: pubmed_211, pubmed_107, ieee_20, ieee_296, ieee_72, ieee_77, ieee_53, pubmed_77, pubmed_270, ieee_25, pubmed_56, pubmed_225, ieee_325, ieee_6, pubmed_216, pubmed_100, ieee_249, ieee_24, pubmed_30, ieee_328, pubmed_16
+2026-10-16 21:51:19,983 [INFO    ] 
+🔹 Concepto 1:
+2026-10-16 21:51:19,983 [INFO    ]    Pregunta: How accurately do large language models interpret physiological signals for tasks such as affect recognition, stress detection, cognitive load estimation, activity recognition, sleep and health inference under zero-shot, few-shot, chain-of-thought, and fine-tuned settings compared with specialized baselines and human experts?
+2026-10-16 21:51:19,983 [INFO    ]    📄 Documentos: 42 (Dinámico por calidad)
+2026-10-16 21:51:19,984 [INFO    ]    🆔 IDs: ieee_53, ieee_6, ieee_77, ieee_18, pubmed_107, ieee_20, pubmed_100, ieee_25, ieee_72, pubmed_77, pubmed_56, pubmed_211, pubmed_60, ieee_296, pubmed_133, pubmed_216, pubmed_248, pubmed_270, ieee_86, pubmed_2, pubmed_8, pubmed_154, ieee_52, pubmed_83, pubmed_246, pubmed_36, ieee_60, ieee_63, pubmed_227, ieee_12, pubmed_229, ieee_82, ieee_197, ieee_161, ieee_124, ieee_217, pubmed_467, pubmed_290, ieee_267, ieee_58, pubmed_289, pubmed_329
+2026-10-16 21:51:19,984 [INFO    ] 
+🔹 Concepto 2:
+2026-10-16 21:51:19,984 [INFO    ]    Pregunta: How are confidence, calibration, uncertainty, hallucination, and factual faithfulness of large language model outputs measured when interpreting physiological or wearable sensor data, including verbalized confidence, token probabilities, self-consistency, expected calibration error, selective prediction, abstention, and programmatic verification of claims?
+2026-10-16 21:51:19,984 [INFO    ]    📄 Documentos: 19 (Dinámico por calidad)
+2026-10-16 21:51:19,984 [INFO    ]    🆔 IDs: ieee_77, pubmed_100, ieee_53, ieee_25, pubmed_107, ieee_6, ieee_72, pubmed_248, ieee_18, ieee_296, ieee_20, pubmed_39, pubmed_270, ieee_16, pubmed_211, pubmed_77, ieee_24, pubmed_188, pubmed_138
+2026-10-16 21:51:19,984 [INFO    ] 
+🔹 Concepto 3:
+2026-10-16 21:51:19,984 [INFO    ]    Pregunta: Do large language models detect or account for degraded signal quality such as noise, motion artifacts, flat or saturated channels, missing data, clock desynchronization, or distribution shift when interpreting physiological signals, and how is robustness evaluated under controlled degradations with known ground truth?
+2026-10-16 21:51:19,984 [INFO    ]    📄 Documentos: 1 (Dinámico por calidad)
+2026-10-16 21:51:19,984 [INFO    ]    🆔 IDs: pubmed_17
+2026-10-16 21:51:19,984 [INFO    ] 
+🔹 Concepto 4:
+2026-10-16 21:51:19,984 [INFO    ]    Pregunta: Which interpretability and analysis methods, such as probing classifiers, feature attribution, attention analysis, counterfactual inputs, representation ablation, prompt sensitivity, and explanation faithfulness, have been applied to large language models processing physiological or time-series data?
+2026-10-16 21:51:19,984 [INFO    ]    📄 Documentos: 4 (Dinámico por calidad)
+2026-10-16 21:51:19,984 [INFO    ]    🆔 IDs: pubmed_80, pubmed_232, pubmed_19, ieee_337
+2026-10-16 21:51:19,984 [INFO    ] 
+🔹 Concepto 5:
+2026-10-16 21:51:19,984 [INFO    ]    Pregunta: How can physiological signals be integrated into large language model pipelines through tool use, agents, function calling, retrieval-augmented generation, external quality gating or auditing, abstention mechanisms, and multimodal fusion, and what are the safety, privacy, and ethical implications of such integration?
+2026-10-16 21:51:19,984 [INFO    ]    📄 Documentos: 22 (Dinámico por calidad)
+2026-10-16 21:51:19,984 [INFO    ]    🆔 IDs: ieee_77, pubmed_107, ieee_18, ieee_20, ieee_6, ieee_72, pubmed_100, ieee_53, ieee_296, pubmed_133, pubmed_56, ieee_25, pubmed_225, pubmed_253, pubmed_77, pubmed_216, pubmed_60, ieee_19, pubmed_210, ieee_131, ieee_366, ieee_180
+2026-10-16 21:51:19,984 [INFO    ] 
+--------------------------------------------------------------------------------
+2026-10-16 21:51:19,984 [INFO    ] ✅ Total de documentos alineados: 109
+2026-10-16 21:51:19,984 [INFO    ] ================================================================================
+2026-10-16 21:51:20,057 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:51:20,057 [INFO    ] 🚀 [START] Processing processFineTuning
+2026-10-16 21:51:20,316 [INFO    ] [FineTuning] ⚠️  El corpus cambió desde el último fine-tuning. Regenerando modelo...
+2026-10-16 21:51:20,316 [INFO    ] [FineTuning] Base model: BAAI/bge-base-en-v1.5 | Epochs: 1 | Batch: 4 | Max pairs: 2000
+2026-10-16 21:51:20,331 [INFO    ] [FineTuning] Fuentes: 64 structured, 64 zoned, 6 aligned concepts
+2026-10-16 21:51:20,332 [INFO    ] [FineTuning] Pares positivos por zoning: 67
+2026-10-16 21:51:20,332 [INFO    ] [FineTuning] Pares positivos por conceptos: 176
+2026-10-16 21:51:20,332 [INFO    ] [FineTuning] Pares positivos por RQs: 177
+2026-10-16 21:51:20,333 [INFO    ] [FineTuning] Pares negativos generados: 177
+2026-10-16 21:51:20,333 [INFO    ] [FineTuning] Total pares finales: 354 (positivos: 177, negativos: 177)
+2026-10-16 21:51:20,333 [INFO    ] [FineTuning] Cargando modelo base: BAAI/bge-base-en-v1.5
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 16583.22it/s]
+2026-10-16 21:51:23,240 [INFO    ] [FineTuning] Entrenando: 354 ejemplos, 1 épocas, batch=4, lr=2e-05
+Computing widget examples:   0%|          | 0/1 [00:00<?, ?example/s]                                                                       0%|          | 0/89 [00:00<?, ?it/s]  1%|          | 1/89 [00:00<01:04,  1.37it/s]  2%|▏         | 2/89 [00:00<00:32,  2.70it/s]  3%|▎         | 3/89 [00:00<00:22,  3.81it/s]  4%|▍         | 4/89 [00:01<00:17,  4.74it/s]  6%|▌         | 5/89 [00:01<00:16,  5.01it/s]  7%|▋         | 6/89 [00:01<00:14,  5.65it/s]  8%|▊         | 7/89 [00:01<00:14,  5.66it/s]  9%|▉         | 8/89 [00:01<00:13,  6.16it/s] 10%|█         | 9/89 [00:01<00:12,  6.53it/s] 11%|█         | 10/89 [00:02<00:11,  6.60it/s] 12%|█▏        | 11/89 [00:02<00:11,  6.56it/s] 13%|█▎        | 12/89 [00:02<00:11,  6.50it/s] 15%|█▍        | 13/89 [00:02<00:11,  6.38it/s] 16%|█▌        | 14/89 [00:02<00:12,  6.03it/s] 17%|█▋        | 15/89 [00:02<00:11,  6.18it/s] 18%|█▊        | 16/89 [00:02<00:11,  6.60it/s] 19%|█▉        | 17/89 [00:03<00:10,  6.56it/s] 20%|██        | 18/89 [00:03<00:10,  6.83it/s] 21%|██▏       | 19/89 [00:03<00:09,  7.25it/s] 22%|██▏       | 20/89 [00:03<00:10,  6.54it/s] 24%|██▎       | 21/89 [00:03<00:10,  6.35it/s] 25%|██▍       | 22/89 [00:03<00:10,  6.22it/s] 26%|██▌       | 23/89 [00:04<00:10,  6.03it/s] 27%|██▋       | 24/89 [00:04<00:09,  6.68it/s] 28%|██▊       | 25/89 [00:04<00:09,  6.75it/s] 29%|██▉       | 26/89 [00:04<00:08,  7.06it/s] 30%|███       | 27/89 [00:04<00:08,  6.98it/s] 31%|███▏      | 28/89 [00:04<00:09,  6.16it/s] 33%|███▎      | 29/89 [00:04<00:09,  6.46it/s] 34%|███▎      | 30/89 [00:05<00:08,  6.84it/s] 35%|███▍      | 31/89 [00:05<00:08,  6.50it/s] 36%|███▌      | 32/89 [00:05<00:09,  5.95it/s] 37%|███▋      | 33/89 [00:05<00:09,  5.80it/s] 38%|███▊      | 34/89 [00:05<00:10,  5.35it/s] 39%|███▉      | 35/89 [00:06<00:09,  5.54it/s] 40%|████      | 36/89 [00:06<00:09,  5.35it/s] 42%|████▏     | 37/89 [00:06<00:08,  5.98it/s] 43%|████▎     | 38/89 [00:06<00:08,  5.87it/s] 44%|████▍     | 39/89 [00:06<00:08,  6.11it/s] 45%|████▍     | 40/89 [00:06<00:08,  6.00it/s] 46%|████▌     | 41/89 [00:06<00:07,  6.17it/s] 47%|████▋     | 42/89 [00:07<00:07,  6.47it/s] 48%|████▊     | 43/89 [00:07<00:07,  6.56it/s] 49%|████▉     | 44/89 [00:07<00:07,  6.34it/s] 51%|█████     | 45/89 [00:07<00:06,  6.77it/s] 52%|█████▏    | 46/89 [00:07<00:06,  6.36it/s] 53%|█████▎    | 47/89 [00:07<00:06,  6.30it/s] 54%|█████▍    | 48/89 [00:08<00:06,  6.28it/s] 55%|█████▌    | 49/89 [00:08<00:06,  6.37it/s] 56%|█████▌    | 50/89 [00:08<00:05,  6.85it/s] 57%|█████▋    | 51/89 [00:08<00:05,  6.56it/s] 58%|█████▊    | 52/89 [00:08<00:05,  6.40it/s] 60%|█████▉    | 53/89 [00:08<00:05,  6.92it/s] 61%|██████    | 54/89 [00:08<00:05,  6.37it/s] 62%|██████▏   | 55/89 [00:09<00:05,  6.49it/s] 63%|██████▎   | 56/89 [00:09<00:05,  5.99it/s] 64%|██████▍   | 57/89 [00:09<00:05,  5.43it/s] 65%|██████▌   | 58/89 [00:09<00:05,  5.94it/s] 66%|██████▋   | 59/89 [00:09<00:04,  6.07it/s] 67%|██████▋   | 60/89 [00:10<00:04,  5.91it/s] 69%|██████▊   | 61/89 [00:10<00:05,  5.48it/s] 70%|██████▉   | 62/89 [00:10<00:04,  6.15it/s] 71%|███████   | 63/89 [00:10<00:04,  6.21it/s] 72%|███████▏  | 64/89 [00:10<00:04,  6.09it/s] 73%|███████▎  | 65/89 [00:10<00:03,  6.18it/s] 74%|███████▍  | 66/89 [00:11<00:03,  5.88it/s] 75%|███████▌  | 67/89 [00:11<00:04,  5.39it/s] 78%|███████▊  | 69/89 [00:11<00:03,  6.32it/s] 79%|███████▊  | 70/89 [00:11<00:03,  6.24it/s] 80%|███████▉  | 71/89 [00:11<00:03,  5.94it/s] 81%|████████  | 72/89 [00:11<00:02,  6.33it/s] 82%|████████▏ | 73/89 [00:12<00:02,  6.01it/s] 83%|████████▎ | 74/89 [00:12<00:02,  6.53it/s] 84%|████████▍ | 75/89 [00:12<00:02,  5.97it/s] 85%|████████▌ | 76/89 [00:12<00:01,  6.63it/s] 87%|████████▋ | 77/89 [00:12<00:02,  5.39it/s] 88%|████████▊ | 78/89 [00:12<00:01,  6.02it/s] 89%|████████▉ | 79/89 [00:13<00:01,  6.14it/s] 90%|████████▉ | 80/89 [00:13<00:01,  6.72it/s] 91%|█████████ | 81/89 [00:13<00:01,  6.92it/s] 92%|█████████▏| 82/89 [00:13<00:01,  6.82it/s] 93%|█████████▎| 83/89 [00:13<00:00,  7.32it/s] 94%|█████████▍| 84/89 [00:13<00:00,  6.92it/s] 96%|█████████▌| 85/89 [00:13<00:00,  6.75it/s] 97%|█████████▋| 86/89 [00:14<00:00,  6.96it/s] 98%|█████████▊| 87/89 [00:14<00:00,  6.68it/s] 99%|█████████▉| 88/89 [00:14<00:00,  7.11it/s]100%|██████████| 89/89 [00:14<00:00,  6.83it/s]                                               100%|██████████| 89/89 [00:14<00:00,  6.83it/s]100%|██████████| 89/89 [00:14<00:00,  6.10it/s]
+{'train_runtime': '14.59', 'train_samples_per_second': '24.27', 'train_steps_per_second': '6.102', 'train_loss': '0.1596', 'epoch': '1'}
+Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:02<00:00,  2.72s/it]Writing model shards: 100%|██████████| 1/1 [00:02<00:00,  2.72s/it]
+2026-10-16 21:51:41,437 [INFO    ] [FineTuning] Modelo guardado en: /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/models/slip-sensores
+2026-10-16 21:51:41,437 [INFO    ] [FineTuning] ✅ Completo. Modelo en: /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/models/slip-sensores
+2026-10-16 21:51:41,437 [INFO    ] [FineTuning] Checksum guardado para detección de cambios futuros.
+2026-10-16 21:51:41,437 [INFO    ] [FineTuning] 🔄 Se recomienda reiniciar el pipeline para que discoveryEngine use este modelo fine-tuneado en lugar del modelo base.
+2026-10-16 21:51:41,653 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:51:41,653 [INFO    ] 🚀 [START] Processing processConceptEvidence
+2026-10-16 21:51:41,702 [INFO    ] [Evidence] Zoned lookup loaded: 64 papers, 297 paragraphs
+2026-10-16 21:51:41,702 [INFO    ] [Evidence] Focus terms: 112 | Expansion: enabled | Sections lookup: 64 papers | Zoned lookup: 64 papers | Zone weighting: enabled | genericity_penalty=0.5 generic_threshold=0.8
+2026-10-16 21:51:41,746 [INFO    ] [Factory] Qwen3 detected: bumping num_predict to 2000
+2026-10-16 21:51:53,935 [INFO    ] [QueryExpander] Concept 0: 'How are physiological and wearable sensor signals converted into inputs that a large language model can process, including numerical serialization, statistical summaries, signal plots for vision-language models, time-series tokenization, learned encoders or projectors, and retrieval-augmented representations?' → 7 terms (preview: ['representación de señales fisiológicas en LLMs', 'conversión de sensores a entrada LLM', 'serialización numérica de señales biológicas'])
+2026-10-16 21:52:02,414 [INFO    ] [QueryExpander] Concept 1: 'How accurately do large language models interpret physiological signals for tasks such as affect recognition, stress detection, cognitive load estimation, activity recognition, sleep and health inference under zero-shot, few-shot, chain-of-thought, and fine-tuned settings compared with specialized baselines and human experts?' → 7 terms (preview: ['interpretación de señales fisiológicas por LLM', 'evaluación de LLM en reconocimiento afectivo', 'detección de estrés mediante modelos de lenguaje'])
+2026-10-16 21:52:09,257 [INFO    ] [QueryExpander] Concept 2: 'How are confidence, calibration, uncertainty, hallucination, and factual faithfulness of large language model outputs measured when interpreting physiological or wearable sensor data, including verbalized confidence, token probabilities, self-consistency, expected calibration error, selective prediction, abstention, and programmatic verification of claims?' → 7 terms (preview: ['medida de confianza en sensores', 'calibración de modelos LLM', 'error de calibración esperado'])
+2026-10-16 21:52:16,637 [INFO    ] [QueryExpander] Concept 3: 'Do large language models detect or account for degraded signal quality such as noise, motion artifacts, flat or saturated channels, missing data, clock desynchronization, or distribution shift when interpreting physiological signals, and how is robustness evaluated under controlled degradations with known ground truth?' → 7 terms (preview: ['degradación controlada en señales fisiológicas', 'evaluación de robustez bajo ruido', 'sensibilidad a artefactos de movimiento'])
+2026-10-16 21:52:23,181 [INFO    ] [QueryExpander] Concept 4: 'Which interpretability and analysis methods, such as probing classifiers, feature attribution, attention analysis, counterfactual inputs, representation ablation, prompt sensitivity, and explanation faithfulness, have been applied to large language models processing physiological or time-series data?' → 7 terms (preview: ['métodos de interpretación de modelos', 'análisis de atribución de características', 'estudios de sensibilidad al prompt'])
+2026-10-16 21:52:30,465 [INFO    ] [QueryExpander] Concept 5: 'How can physiological signals be integrated into large language model pipelines through tool use, agents, function calling, retrieval-augmented generation, external quality gating or auditing, abstention mechanisms, and multimodal fusion, and what are the safety, privacy, and ethical implications of such integration?' → 7 terms (preview: ['integración de señales fisiológicas en LLM', 'agentes con herramientas para procesamiento médico', 'generación aumentada por recuperación multimodal'])
+2026-10-16 21:52:30,465 [INFO    ] [Evidence] Query expansion completed
+2026-10-16 21:52:30,465 [INFO    ] [ModelRegistry] Loading spaCy sentencizer...
+2026-10-16 21:52:30,514 [INFO    ] [ModelRegistry] Loading embedding model: BAAI/bge-base-en-v1.5
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 17723.04it/s]
+2026-10-16 21:52:33,061 [INFO    ] [Evidence] Processing concept 0
+2026-10-16 21:52:33,972 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_211: 94 → 2 after clustering
+2026-10-16 21:52:34,971 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_107: 96 → 1 after clustering
+2026-10-16 21:52:35,586 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_20: 45 → 1 after clustering
+2026-10-16 21:52:37,000 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_296: 133 → 2 after clustering
+2026-10-16 21:52:38,698 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_72: 132 → 1 after clustering
+2026-10-16 21:52:39,950 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_77: 106 → 2 after clustering
+2026-10-16 21:52:40,966 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_53: 107 → 1 after clustering
+2026-10-16 21:52:47,628 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_77: 416 → 2 after clustering
+2026-10-16 21:52:50,651 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_270: 296 → 2 after clustering
+2026-10-16 21:52:52,857 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_25: 157 → 1 after clustering
+2026-10-16 21:52:53,367 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_56: 44 → 4 after clustering
+2026-10-16 21:52:55,163 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_225: 162 → 1 after clustering
+2026-10-16 21:52:56,231 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_325: 86 → 1 after clustering
+2026-10-16 21:52:56,427 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_6: 22 → 1 after clustering
+2026-10-16 21:52:57,142 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_216: 89 → 3 after clustering
+2026-10-16 21:53:02,958 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_100: 538 → 1 after clustering
+2026-10-16 21:53:06,153 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_249: 421 → 1 after clustering
+2026-10-16 21:53:07,609 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_24: 122 → 1 after clustering
+2026-10-16 21:53:11,852 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_30: 407 → 2 after clustering
+2026-10-16 21:53:12,848 [DEBUG   ] [ConceptProcessor] Concept 0, doc ieee_328: 56 → 1 after clustering
+2026-10-16 21:53:13,869 [DEBUG   ] [ConceptProcessor] Concept 0, doc pubmed_16: 86 → 1 after clustering
+2026-10-16 21:53:14,045 [INFO    ] [ConceptProcessor] Concept 0: 22 evidences from 21 docs | consensus: 0 groups
+2026-10-16 21:53:14,045 [INFO    ] [Evidence] Processing concept 1
+2026-10-16 21:53:15,081 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_53: 107 → 1 after clustering
+2026-10-16 21:53:15,280 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_6: 22 → 1 after clustering
+2026-10-16 21:53:16,538 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_77: 106 → 2 after clustering
+2026-10-16 21:53:17,070 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_18: 52 → 1 after clustering
+2026-10-16 21:53:18,067 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_107: 96 → 1 after clustering
+2026-10-16 21:53:18,684 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_20: 45 → 1 after clustering
+2026-10-16 21:53:24,504 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_100: 538 → 1 after clustering
+2026-10-16 21:53:26,717 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_25: 157 → 1 after clustering
+2026-10-16 21:53:28,428 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_72: 132 → 1 after clustering
+2026-10-16 21:53:35,136 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_77: 416 → 2 after clustering
+2026-10-16 21:53:35,640 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_56: 44 → 4 after clustering
+2026-10-16 21:53:36,531 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_211: 94 → 2 after clustering
+2026-10-16 21:53:39,126 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_60: 248 → 3 after clustering
+2026-10-16 21:53:40,539 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_296: 133 → 2 after clustering
+2026-10-16 21:53:42,863 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_133: 112 → 2 after clustering
+2026-10-16 21:53:43,582 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_216: 89 → 3 after clustering
+2026-10-16 21:53:45,886 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_248: 132 → 1 after clustering
+2026-10-16 21:53:48,907 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_270: 296 → 2 after clustering
+2026-10-16 21:53:50,375 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_86: 127 → 1 after clustering
+2026-10-16 21:53:52,936 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_2: 148 → 2 after clustering
+2026-10-16 21:53:56,898 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_8: 424 → 3 after clustering
+2026-10-16 21:53:58,983 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_154: 176 → 3 after clustering
+2026-10-16 21:54:00,424 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_52: 154 → 1 after clustering
+2026-10-16 21:54:03,662 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_83: 255 → 1 after clustering
+2026-10-16 21:54:06,822 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_246: 207 → 2 after clustering
+2026-10-16 21:54:12,976 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_36: 620 → 3 after clustering
+2026-10-16 21:54:14,653 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_60: 224 → 1 after clustering
+2026-10-16 21:54:16,058 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_63: 123 → 1 after clustering
+2026-10-16 21:54:18,435 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_227: 274 → 2 after clustering
+2026-10-16 21:54:19,158 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_12: 28 → 1 after clustering
+2026-10-16 21:54:20,428 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_229: 88 → 2 after clustering
+2026-10-16 21:54:21,476 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_82: 71 → 1 after clustering
+2026-10-16 21:54:22,222 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_197: 54 → 1 after clustering
+2026-10-16 21:54:23,932 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_161: 143 → 2 after clustering
+2026-10-16 21:54:28,429 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_124: 394 → 1 after clustering
+2026-10-16 21:54:29,438 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_217: 120 → 1 after clustering
+2026-10-16 21:54:31,705 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_467: 238 → 2 after clustering
+2026-10-16 21:54:33,264 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_290: 177 → 1 after clustering
+2026-10-16 21:54:33,582 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_267: 38 → 1 after clustering
+2026-10-16 21:54:34,450 [DEBUG   ] [ConceptProcessor] Concept 1, doc ieee_58: 78 → 1 after clustering
+2026-10-16 21:54:36,495 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_289: 193 → 2 after clustering
+2026-10-16 21:54:39,484 [DEBUG   ] [ConceptProcessor] Concept 1, doc pubmed_329: 309 → 7 after clustering
+2026-10-16 21:54:39,838 [DEBUG   ] [EvidenceFilter] Rescued doc pubmed_56 (sim=0.935)
+2026-10-16 21:54:39,839 [DEBUG   ] [EvidenceFilter] Rescued doc pubmed_107 (sim=0.930)
+2026-10-16 21:54:39,839 [DEBUG   ] [EvidenceFilter] Rescued doc pubmed_229 (sim=0.540)
+2026-10-16 21:54:39,839 [INFO    ] [ConceptProcessor] Concept 1: 46 evidences from 39 docs | consensus: 3 groups
+2026-10-16 21:54:39,839 [INFO    ] [Evidence] Processing concept 2
+2026-10-16 21:54:41,110 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_77: 106 → 2 after clustering
+2026-10-16 21:54:46,926 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_100: 538 → 1 after clustering
+2026-10-16 21:54:47,947 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_53: 107 → 1 after clustering
+2026-10-16 21:54:50,148 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_25: 157 → 1 after clustering
+2026-10-16 21:54:51,153 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_107: 96 → 1 after clustering
+2026-10-16 21:54:51,350 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_6: 22 → 1 after clustering
+2026-10-16 21:54:53,062 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_72: 132 → 1 after clustering
+2026-10-16 21:54:55,375 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_248: 132 → 1 after clustering
+2026-10-16 21:54:55,903 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_18: 52 → 1 after clustering
+2026-10-16 21:54:57,316 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_296: 133 → 2 after clustering
+2026-10-16 21:54:57,937 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_20: 45 → 1 after clustering
+2026-10-16 21:55:02,045 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_39: 364 → 2 after clustering
+2026-10-16 21:55:05,082 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_270: 296 → 2 after clustering
+2026-10-16 21:55:06,823 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_16: 189 → 1 after clustering
+2026-10-16 21:55:07,718 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_211: 94 → 2 after clustering
+2026-10-16 21:55:14,438 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_77: 416 → 2 after clustering
+2026-10-16 21:55:15,900 [DEBUG   ] [ConceptProcessor] Concept 2, doc ieee_24: 122 → 1 after clustering
+2026-10-16 21:55:17,866 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_188: 125 → 1 after clustering
+2026-10-16 21:55:18,768 [DEBUG   ] [ConceptProcessor] Concept 2, doc pubmed_138: 98 → 1 after clustering
+2026-10-16 21:55:18,878 [DEBUG   ] [EvidenceFilter] Rescued doc pubmed_188 (sim=1.324)
+2026-10-16 21:55:18,879 [DEBUG   ] [EvidenceFilter] Rescued doc pubmed_107 (sim=0.872)
+2026-10-16 21:55:18,879 [INFO    ] [ConceptProcessor] Concept 2: 19 evidences from 19 docs | consensus: 0 groups
+2026-10-16 21:55:18,879 [INFO    ] [Evidence] Processing concept 3
+2026-10-16 21:55:20,264 [DEBUG   ] [ConceptProcessor] Concept 3, doc pubmed_17: 139 → 1 after clustering
+2026-10-16 21:55:20,273 [INFO    ] [ConceptProcessor] Concept 3: 1 evidences from 1 docs | consensus: 0 groups
+2026-10-16 21:55:20,273 [INFO    ] [Evidence] Processing concept 4
+2026-10-16 21:55:25,146 [DEBUG   ] [ConceptProcessor] Concept 4, doc pubmed_80: 461 → 2 after clustering
+2026-10-16 21:55:31,117 [DEBUG   ] [ConceptProcessor] Concept 4, doc pubmed_232: 450 → 2 after clustering
+2026-10-16 21:55:33,408 [DEBUG   ] [ConceptProcessor] Concept 4, doc pubmed_19: 280 → 1 after clustering
+2026-10-16 21:55:37,433 [DEBUG   ] [ConceptProcessor] Concept 4, doc ieee_337: 448 → 2 after clustering
+2026-10-16 21:55:37,472 [INFO    ] [ConceptProcessor] Concept 4: 4 evidences from 4 docs | consensus: 0 groups
+2026-10-16 21:55:37,473 [INFO    ] [Evidence] Processing concept 5
+2026-10-16 21:55:38,746 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_77: 106 → 2 after clustering
+2026-10-16 21:55:39,751 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_107: 96 → 1 after clustering
+2026-10-16 21:55:40,284 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_18: 52 → 1 after clustering
+2026-10-16 21:55:40,905 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_20: 45 → 1 after clustering
+2026-10-16 21:55:41,100 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_6: 22 → 1 after clustering
+2026-10-16 21:55:42,811 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_72: 132 → 1 after clustering
+2026-10-16 21:55:48,626 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_100: 538 → 1 after clustering
+2026-10-16 21:55:49,652 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_53: 107 → 1 after clustering
+2026-10-16 21:55:51,068 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_296: 133 → 2 after clustering
+2026-10-16 21:55:53,394 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_133: 112 → 2 after clustering
+2026-10-16 21:55:53,900 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_56: 44 → 4 after clustering
+2026-10-16 21:55:56,109 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_25: 157 → 1 after clustering
+2026-10-16 21:55:57,909 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_225: 162 → 1 after clustering
+2026-10-16 21:56:00,109 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_253: 275 → 3 after clustering
+2026-10-16 21:56:06,840 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_77: 416 → 2 after clustering
+2026-10-16 21:56:07,557 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_216: 89 → 3 after clustering
+2026-10-16 21:56:10,149 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_60: 248 → 3 after clustering
+2026-10-16 21:56:11,201 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_19: 68 → 1 after clustering
+2026-10-16 21:56:14,314 [DEBUG   ] [ConceptProcessor] Concept 5, doc pubmed_210: 378 → 2 after clustering
+2026-10-16 21:56:18,784 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_131: 487 → 1 after clustering
+2026-10-16 21:56:19,132 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_366: 31 → 1 after clustering
+2026-10-16 21:56:19,437 [DEBUG   ] [ConceptProcessor] Concept 5, doc ieee_180: 36 → 1 after clustering
+2026-10-16 21:56:19,649 [DEBUG   ] [EvidenceFilter] Rescued doc pubmed_107 (sim=0.871)
+2026-10-16 21:56:19,649 [INFO    ] [ConceptProcessor] Concept 5: 25 evidences from 22 docs | consensus: 0 groups
+2026-10-16 21:56:19,651 [INFO    ] [Evidence] Saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/concept_evidence.json
+2026-10-16 21:56:19,651 [INFO    ] ================================================================================
+2026-10-16 21:56:19,651 [INFO    ] RESUMEN DE CONCEPTOS CON EVIDENCIAS (knowledge_units)
+2026-10-16 21:56:19,651 [INFO    ] ================================================================================
+2026-10-16 21:56:19,651 [INFO    ] Concepto 0: 'How are physiological and wearable sensor signals converted into inputs that a l...' | 22 units | 21 docs
+2026-10-16 21:56:19,651 [INFO    ] Concepto 1: 'How accurately do large language models interpret physiological signals for task...' | 46 units | 39 docs
+2026-10-16 21:56:19,651 [INFO    ] Concepto 2: 'How are confidence, calibration, uncertainty, hallucination, and factual faithfu...' | 19 units | 19 docs
+2026-10-16 21:56:19,651 [INFO    ] Concepto 3: 'Do large language models detect or account for degraded signal quality such as n...' | 1 units | 1 docs
+2026-10-16 21:56:19,651 [INFO    ] Concepto 4: 'Which interpretability and analysis methods, such as probing classifiers, featur...' | 4 units | 4 docs
+2026-10-16 21:56:19,651 [INFO    ] Concepto 5: 'How can physiological signals be integrated into large language model pipelines ...' | 25 units | 22 docs
+2026-10-16 21:56:19,651 [INFO    ] --------------------------------------------------------------------------------
+2026-10-16 21:56:19,651 [INFO    ] Total knowledge units: 117
+2026-10-16 21:56:19,651 [INFO    ] ================================================================================
+2026-10-16 21:56:19,706 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:56:19,706 [INFO    ] 🚀 [START] Processing processConceptEvidence
+2026-10-16 21:56:19,706 [INFO    ] [ClusterEvidences] Loaded 112 focus terms
+2026-10-16 21:56:19,707 [INFO    ] Cargando modelo de embeddings...
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 18612.25it/s]
+2026-10-16 21:56:22,905 [INFO    ] [Factory] Qwen3 detected: bumping num_predict to 2000
+2026-10-16 21:56:22,909 [INFO    ] Procesando Concepto 0 (22 evidencias, focus_density=0.00)...
+2026-10-16 21:56:23,029 [INFO    ] [Clustering] 22 evidencias, threshold=0.340 (focus_density=0.00, min_similarity=0.66)
+2026-10-16 21:56:23,030 [INFO    ] [Merge] 3/3 singletons fusionados (distancias: ['0.157', '0.154', '0.256'])
+2026-10-16 21:56:23,030 [INFO    ] [Clustering] Post-merge: 4→1 clusters, singletons: 3→0
+2026-10-16 21:56:30,943 [INFO    ] 
+============================================================
+2026-10-16 21:56:30,943 [INFO    ] CONCEPTO 0: How are physiological and wearable sensor signals converted into inputs that a large language model can process, including numerical serialization, statistical summaries, signal plots for vision-language models, time-series tokenization, learned encoders or projectors, and retrieval-augmented representations?
+2026-10-16 21:56:30,943 [INFO    ] Focus terms: hallucination physiological signals, alucinación señales fisiológicas, confidence calibration large language model, calibración de confianza modelos de lenguaje, LLM wearable sensor data, LLM datos de wearables, signal quality degradation LLM, degradación de calidad de señal LLM, LLM interpretability physiological time series, interpretabilidad LLM series temporales fisiológicas
+2026-10-16 21:56:30,943 [INFO    ] Focus density: 0.00
+2026-10-16 21:56:30,944 [INFO    ] ============================================================
+2026-10-16 21:56:30,944 [INFO    ] Total evidencias: 22
+2026-10-16 21:56:30,944 [INFO    ] Número de clusters: 1
+2026-10-16 21:56:30,944 [INFO    ] 
+--- CLUSTER 0 (tamaño: 22) ---
+2026-10-16 21:56:30,944 [INFO    ] Score promedio: 1.477
+2026-10-16 21:56:30,944 [INFO    ] Tema sugerido: This cluster explores how physiological and wearable sensor data are transformed into formats compatible with large language models. Key methods include numerical serialization, statistical summaries, and time-series tokenization, alongside the use of learned encoders and retrieval-augmented representations. The focus is on integrating multimodal data into language model pipelines to enhance performance and enable meaningful interaction between sensor signals and linguistic inputs. These approaches aim to bridge the gap between physiological data and natural language processing capabilities...
+2026-10-16 21:56:30,944 [INFO    ] Papers: ['ieee_77', 'ieee_20', 'ieee_296', 'pubmed_270', 'ieee_325', 'ieee_249', 'pubmed_30', 'ieee_24', 'pubmed_225', 'ieee_72', 'pubmed_100', 'ieee_6', 'pubmed_77', 'pubmed_211', 'ieee_53', 'ieee_25', 'pubmed_16', 'pubmed_216', 'pubmed_107', 'ieee_328', 'pubmed_56']
+2026-10-16 21:56:30,944 [INFO    ]   1. [1.7912] VII. CONCLUSION This work introduces a hybrid architecture that combines large language model interpretation with hierar...
+2026-10-16 21:56:30,944 [INFO    ]   2. [1.7616] For low-frequency physiological signals where temporal context is particularly important, we incorporate summary statist...
+2026-10-16 21:56:30,944 [INFO    ]   3. [1.6842] CONCLUSION The use of biosignals to control active rehabilitation devices presents significant challenges, primarily due...
+2026-10-16 21:56:30,944 [INFO    ]   ... y 19 más
+2026-10-16 21:56:30,951 [INFO    ] Procesando Concepto 1 (46 evidencias, focus_density=0.00)...
+2026-10-16 21:56:31,183 [INFO    ] [Clustering] 46 evidencias, threshold=0.380 (focus_density=0.00, min_similarity=0.62)
+2026-10-16 21:56:31,184 [INFO    ] [Merge] 6/6 singletons fusionados (distancias: ['0.287', '0.367', '0.300', '0.188', '0.149', '0.190'])
+2026-10-16 21:56:31,184 [INFO    ] [Clustering] Post-merge: 8→2 clusters, singletons: 6→0
+2026-10-16 21:56:48,252 [INFO    ] 
+============================================================
+2026-10-16 21:56:48,252 [INFO    ] CONCEPTO 1: How accurately do large language models interpret physiological signals for tasks such as affect recognition, stress detection, cognitive load estimation, activity recognition, sleep and health inference under zero-shot, few-shot, chain-of-thought, and fine-tuned settings compared with specialized baselines and human experts?
+2026-10-16 21:56:48,252 [INFO    ] Focus terms: hallucination physiological signals, alucinación señales fisiológicas, confidence calibration large language model, calibración de confianza modelos de lenguaje, LLM wearable sensor data, LLM datos de wearables, signal quality degradation LLM, degradación de calidad de señal LLM, LLM interpretability physiological time series, interpretabilidad LLM series temporales fisiológicas
+2026-10-16 21:56:48,252 [INFO    ] Focus density: 0.00
+2026-10-16 21:56:48,252 [INFO    ] ============================================================
+2026-10-16 21:56:48,252 [INFO    ] Total evidencias: 46
+2026-10-16 21:56:48,252 [INFO    ] Número de clusters: 2
+2026-10-16 21:56:48,252 [INFO    ] 
+--- CLUSTER 0 (tamaño: 44) ---
+2026-10-16 21:56:48,252 [INFO    ] Score promedio: 1.3982
+2026-10-16 21:56:48,252 [INFO    ] Tema sugerido: This cluster explores how large language models (LLMs) interpret physiological signals to perform tasks like affect recognition and stress detection across various settings. The focus is on evaluating model performance against specialized baselines and human experts, highlighting the role of data and language in shaping interpretation accuracy. Key findings emphasize the challenges LLMs face in understanding complex physiological patterns without fine-tuning or additional context. Overall, the studies underscore the potential and limitations of using LLMs for health-related inference tasks...
+2026-10-16 21:56:48,252 [INFO    ] Papers: ['ieee_20', 'pubmed_270', 'pubmed_2', 'ieee_58', 'ieee_60', 'pubmed_248', 'ieee_72', 'ieee_296', 'pubmed_227', 'ieee_197', 'ieee_267', 'ieee_217', 'pubmed_289', 'ieee_6', 'pubmed_100', 'pubmed_83', 'ieee_53', 'ieee_86', 'ieee_63', 'pubmed_8', 'ieee_77', 'ieee_161', 'pubmed_211', 'pubmed_60', 'ieee_18', 'ieee_25', 'pubmed_77', 'pubmed_246', 'pubmed_329', 'pubmed_133', 'pubmed_154', 'pubmed_467', 'ieee_12', 'pubmed_216', 'ieee_124', 'pubmed_56', 'pubmed_107', 'pubmed_229', 'pubmed_36']
+2026-10-16 21:56:48,252 [INFO    ]   1. [1.7603] For low-frequency physiological signals where temporal context is particularly important, we incorporate summary statist...
+2026-10-16 21:56:48,252 [INFO    ]   2. [1.7491] The gap between the word bound and the physiological ceiling, approximately 25 – 129 bits/min, cannot be recovered throu...
+2026-10-16 21:56:48,252 [INFO    ]   3. [1.7408] Fig. 1. We created Personal Health Large Language Model (PH-LLM), a version of Gemini finetuned to generate both insight...
+2026-10-16 21:56:48,252 [INFO    ]   ... y 41 más
+2026-10-16 21:56:48,252 [INFO    ] 
+--- CLUSTER 1 (tamaño: 2) ---
+2026-10-16 21:56:48,252 [INFO    ] Score promedio: 1.0154
+2026-10-16 21:56:48,252 [INFO    ] Tema sugerido: The reviewed studies focus on how large language models interpret physiological signals for affective and health-related tasks, using diverse data collection methods and analytical approaches. They explore model performance across different settings, including zero-shot and fine-tuned scenarios, while comparing outcomes with specialized baselines and human experts. The emphasis is on evaluating the accuracy and reliability of LLMs in understanding complex physiological content without prior task-specific training. These studies highlight the potential and limitations of using language models for health inference from non-verbal data...
+2026-10-16 21:56:48,252 [INFO    ] Papers: ['pubmed_8', 'pubmed_227']
+2026-10-16 21:56:48,252 [INFO    ]   1. [1.0329] AUTHOR CONTRIBUTIONS VZ designed and implemented the dance program, collected the data and prepared the initial draft of...
+2026-10-16 21:56:48,252 [INFO    ]   2. [0.9979] After using these tools/services, the author(s) reviewed and edited the content as needed and take(s) full responsibilit...
+2026-10-16 21:56:48,257 [INFO    ] Procesando Concepto 2 (19 evidencias, focus_density=0.00)...
+2026-10-16 21:56:48,344 [INFO    ] [Clustering] 19 evidencias, threshold=0.320 (focus_density=0.00, min_similarity=0.68)
+2026-10-16 21:56:48,345 [INFO    ] [Merge] 2/2 singletons fusionados (distancias: ['0.228', '0.157'])
+2026-10-16 21:56:48,345 [INFO    ] [Clustering] Post-merge: 5→3 clusters, singletons: 2→0
+2026-10-16 21:57:09,406 [INFO    ] 
+============================================================
+2026-10-16 21:57:09,406 [INFO    ] CONCEPTO 2: How are confidence, calibration, uncertainty, hallucination, and factual faithfulness of large language model outputs measured when interpreting physiological or wearable sensor data, including verbalized confidence, token probabilities, self-consistency, expected calibration error, selective prediction, abstention, and programmatic verification of claims?
+2026-10-16 21:57:09,406 [INFO    ] Focus terms: hallucination physiological signals, alucinación señales fisiológicas, confidence calibration large language model, calibración de confianza modelos de lenguaje, LLM wearable sensor data, LLM datos de wearables, signal quality degradation LLM, degradación de calidad de señal LLM, LLM interpretability physiological time series, interpretabilidad LLM series temporales fisiológicas
+2026-10-16 21:57:09,406 [INFO    ] Focus density: 0.00
+2026-10-16 21:57:09,406 [INFO    ] ============================================================
+2026-10-16 21:57:09,406 [INFO    ] Total evidencias: 19
+2026-10-16 21:57:09,406 [INFO    ] Número de clusters: 3
+2026-10-16 21:57:09,406 [INFO    ] 
+--- CLUSTER 0 (tamaño: 14) ---
+2026-10-16 21:57:09,406 [INFO    ] Score promedio: 1.5203
+2026-10-16 21:57:09,406 [INFO    ] Tema sugerido: This cluster explores how large language models interpret physiological or wearable sensor data, focusing on measuring confidence, calibration, and factual accuracy. It examines both verbalized confidence and quantitative metrics like expected calibration error and self-consistency. The analysis involves evaluating model performance through classification tasks and reasoning processes, while also considering the role of language in expressing uncertainty. Key methods include token probability assessment and programmatic verification to ensure model outputs align with empirical data...
+2026-10-16 21:57:09,406 [INFO    ] Papers: ['ieee_20', 'ieee_296', 'pubmed_100', 'ieee_77', 'pubmed_39', 'ieee_72', 'ieee_53', 'pubmed_77', 'pubmed_211', 'pubmed_138', 'ieee_25', 'pubmed_107', 'ieee_24', 'ieee_6']
+2026-10-16 21:57:09,406 [INFO    ]   1. [1.7242] The dataset description component establishes crucial domain context by providing detailed information about data origin...
+2026-10-16 21:57:09,406 [INFO    ]   2. [1.6973] This innovative approach equips models to analyze images and videos while interpreting the corresponding text, thereby f...
+2026-10-16 21:57:09,406 [INFO    ]   3. [1.6893] The plot illustrates the relationship between the proportion of the calibration set included in the validation set and t...
+2026-10-16 21:57:09,406 [INFO    ]   ... y 11 más
+2026-10-16 21:57:09,406 [INFO    ] 
+--- CLUSTER 1 (tamaño: 3) ---
+2026-10-16 21:57:09,406 [INFO    ] Score promedio: 1.5046
+2026-10-16 21:57:09,406 [INFO    ] Tema sugerido: The cluster focuses on how large language models assess their confidence and accuracy when interpreting physiological or wearable sensor data. It emphasizes evaluating generated outputs through methods like questionnaires and user experience metrics, alongside quantitative measures such as calibration error and self-consistency. The research explores ways to verify model claims programmatically, aiming to improve transparency and trust in medical applications of LLMs...
+2026-10-16 21:57:09,406 [INFO    ] Papers: ['pubmed_248', 'ieee_18', 'pubmed_188']
+2026-10-16 21:57:09,406 [INFO    ]   1. [1.6353] These metrics do not directly evaluate educational value, conceptual clarity, factual accuracy, or pedagogical effective...
+2026-10-16 21:57:09,406 [INFO    ]   2. [1.5549] Consistency evaluates whether the generated questionnaires conform to the structure of the seven facets of the UX Honeyc...
+2026-10-16 21:57:09,406 [INFO    ]   3. [1.3237] doi: 10.2196/75452] [Medline: 41525685] 3. Gilson A, Safranek CW, Huang T, et al. How does ChatGPT perform on the United...
+2026-10-16 21:57:09,406 [INFO    ] 
+--- CLUSTER 2 (tamaño: 2) ---
+2026-10-16 21:57:09,406 [INFO    ] Score promedio: 1.7036
+2026-10-16 21:57:09,406 [INFO    ] Tema sugerido: The cluster focuses on evaluating the confidence and calibration of large language models when interpreting physiological or wearable sensor data. Key methods include assessing verbalized confidence, token probabilities, and expected calibration error to measure model reliability. The emphasis is on distinguishing between accurate predictions and overconfident or hallucinated outputs. Concepts like self-consistency and programmatic verification are highlighted as tools to enhance factual faithfulness and reduce errors in uncertain scenarios...
+2026-10-16 21:57:09,406 [INFO    ] Papers: ['pubmed_270', 'ieee_16']
+2026-10-16 21:57:09,407 [INFO    ]   1. [1.7235] Future P300 speller improvements will therefore depend more on advances in neural decoding and signal acquisition than o...
+2026-10-16 21:57:09,407 [INFO    ]   2. [1.6838] As seen in the table, subject 11 exhibited significantly lower accuracy compared to other participants and was therefore...
+2026-10-16 21:57:09,407 [INFO    ] Procesando Concepto 3 (1 evidencias, focus_density=0.00)...
+2026-10-16 21:57:09,407 [INFO    ] 
+============================================================
+2026-10-16 21:57:09,407 [INFO    ] CONCEPTO 3: Do large language models detect or account for degraded signal quality such as noise, motion artifacts, flat or saturated channels, missing data, clock desynchronization, or distribution shift when interpreting physiological signals, and how is robustness evaluated under controlled degradations with known ground truth?
+2026-10-16 21:57:09,407 [INFO    ] Focus terms: hallucination physiological signals, alucinación señales fisiológicas, confidence calibration large language model, calibración de confianza modelos de lenguaje, LLM wearable sensor data, LLM datos de wearables, signal quality degradation LLM, degradación de calidad de señal LLM, LLM interpretability physiological time series, interpretabilidad LLM series temporales fisiológicas
+2026-10-16 21:57:09,407 [INFO    ] Focus density: 0.00
+2026-10-16 21:57:09,407 [INFO    ] ============================================================
+2026-10-16 21:57:09,407 [INFO    ] Total evidencias: 1
+2026-10-16 21:57:09,407 [INFO    ] Número de clusters: 1
+2026-10-16 21:57:09,407 [INFO    ] ⚠️  Singletons: 1/1 (100%)
+2026-10-16 21:57:09,407 [INFO    ] 
+--- CLUSTER 0 (tamaño: 1) [SINGLETON] ---
+2026-10-16 21:57:09,407 [INFO    ] Score promedio: 1.5428
+2026-10-16 21:57:09,407 [INFO    ] Tema sugerido: Event-related spectral perturbation (ERSP) was calculated (in dB) and normalized trial-wise to the baseline spectrum (79.3 to 10 ms relative to the TMS pulse) to reduce sensitivity to noisy trials (Grandchamp and Delorme, 2011). Transforming a signal to the time-frequency domain (by wavelet or Fourier transformation) splits the time-series signal into a sum of oscillations. It results in coefﬁcients Zi(t,f) for each combination of time point t and frequency f for each trial i. These coefﬁcients are complex numbers with real and imaginary components that represent the magnitude and the phase ...
+2026-10-16 21:57:09,407 [INFO    ] Papers: ['pubmed_17']
+2026-10-16 21:57:09,407 [INFO    ]   1. [1.5428] Event-related spectral perturbation (ERSP) was calculated (in dB) and normalized trial-wise to the baseline spectrum (7...
+2026-10-16 21:57:09,408 [INFO    ] Procesando Concepto 4 (4 evidencias, focus_density=0.00)...
+2026-10-16 21:57:09,432 [INFO    ] [Clustering] 4 evidencias, threshold=0.420 (focus_density=0.00, min_similarity=0.58)
+2026-10-16 21:57:15,896 [INFO    ] 
+============================================================
+2026-10-16 21:57:15,896 [INFO    ] CONCEPTO 4: Which interpretability and analysis methods, such as probing classifiers, feature attribution, attention analysis, counterfactual inputs, representation ablation, prompt sensitivity, and explanation faithfulness, have been applied to large language models processing physiological or time-series data?
+2026-10-16 21:57:15,896 [INFO    ] Focus terms: hallucination physiological signals, alucinación señales fisiológicas, confidence calibration large language model, calibración de confianza modelos de lenguaje, LLM wearable sensor data, LLM datos de wearables, signal quality degradation LLM, degradación de calidad de señal LLM, LLM interpretability physiological time series, interpretabilidad LLM series temporales fisiológicas
+2026-10-16 21:57:15,896 [INFO    ] Focus density: 0.00
+2026-10-16 21:57:15,896 [INFO    ] ============================================================
+2026-10-16 21:57:15,896 [INFO    ] Total evidencias: 4
+2026-10-16 21:57:15,896 [INFO    ] Número de clusters: 1
+2026-10-16 21:57:15,896 [INFO    ] 
+--- CLUSTER 0 (tamaño: 4) ---
+2026-10-16 21:57:15,896 [INFO    ] Score promedio: 1.532
+2026-10-16 21:57:15,896 [INFO    ] Tema sugerido: Researchers have explored methods like probing classifiers and feature attribution to analyze large language models handling physiological data, such as EEG signals. The focus lies on understanding how these models process temporal information through word-level representations. Studies emphasize the role of data learning in capturing patterns from time-series inputs. Key challenges include interpreting model behavior and ensuring explanation faithfulness when dealing with complex biomedical signals...
+2026-10-16 21:57:15,896 [INFO    ] Papers: ['ieee_337', 'pubmed_19', 'pubmed_80', 'pubmed_232']
+2026-10-16 21:57:15,896 [INFO    ]   1. [1.5926] This technique improves accuracy by combining the temporal features captured by the RNNs and the spatial features extrac...
+2026-10-16 21:57:15,896 [INFO    ]   2. [1.6026] EEG data processing continues with i) downsampling by 2, ii) projection to a lower dimensional space using principle com...
+2026-10-16 21:57:15,897 [INFO    ]   3. [1.5668] In our studies, we find that including E𝑡[ppmi] in ZIP models results in higher values of 𝛥llh compared to ppmi and that...
+2026-10-16 21:57:15,897 [INFO    ]   ... y 1 más
+2026-10-16 21:57:15,901 [INFO    ] Procesando Concepto 5 (25 evidencias, focus_density=0.00)...
+2026-10-16 21:57:16,057 [INFO    ] [Clustering] 25 evidencias, threshold=0.340 (focus_density=0.00, min_similarity=0.66)
+2026-10-16 21:57:16,058 [INFO    ] [Merge] 4/4 singletons fusionados (distancias: ['0.308', '0.238', '0.174', '0.153'])
+2026-10-16 21:57:16,058 [INFO    ] [Clustering] Post-merge: 5→1 clusters, singletons: 4→0
+2026-10-16 21:57:23,041 [INFO    ] 
+============================================================
+2026-10-16 21:57:23,041 [INFO    ] CONCEPTO 5: How can physiological signals be integrated into large language model pipelines through tool use, agents, function calling, retrieval-augmented generation, external quality gating or auditing, abstention mechanisms, and multimodal fusion, and what are the safety, privacy, and ethical implications of such integration?
+2026-10-16 21:57:23,041 [INFO    ] Focus terms: hallucination physiological signals, alucinación señales fisiológicas, confidence calibration large language model, calibración de confianza modelos de lenguaje, LLM wearable sensor data, LLM datos de wearables, signal quality degradation LLM, degradación de calidad de señal LLM, LLM interpretability physiological time series, interpretabilidad LLM series temporales fisiológicas
+2026-10-16 21:57:23,041 [INFO    ] Focus density: 0.00
+2026-10-16 21:57:23,041 [INFO    ] ============================================================
+2026-10-16 21:57:23,041 [INFO    ] Total evidencias: 25
+2026-10-16 21:57:23,041 [INFO    ] Número de clusters: 1
+2026-10-16 21:57:23,041 [INFO    ] 
+--- CLUSTER 0 (tamaño: 25) ---
+2026-10-16 21:57:23,041 [INFO    ] Score promedio: 1.388
+2026-10-16 21:57:23,041 [INFO    ] Tema sugerido: The integration of physiological signals into large language model (LLM) pipelines involves leveraging data from biological sources to enhance model performance and contextual understanding. Researchers explore how these signals can be incorporated through various techniques such as function calling and multimodal fusion, aiming to improve interaction accuracy and personalization. However, this integration raises critical concerns regarding safety, privacy, and ethical use of sensitive physiological data within AI systems...
+2026-10-16 21:57:23,041 [INFO    ] Papers: ['ieee_77', 'ieee_20', 'ieee_180', 'ieee_296', 'pubmed_210', 'ieee_72', 'pubmed_100', 'ieee_19', 'ieee_131', 'ieee_6', 'pubmed_253', 'ieee_18', 'ieee_53', 'pubmed_77', 'ieee_25', 'pubmed_60', 'pubmed_225', 'pubmed_133', 'pubmed_216', 'pubmed_56', 'pubmed_107', 'ieee_366']
+2026-10-16 21:57:23,041 [INFO    ]   1. [1.8355] VII. CONCLUSION This work introduces a hybrid architecture that combines large language model interpretation with hierar...
+2026-10-16 21:57:23,041 [INFO    ]   2. [1.7812] The dataset description component establishes crucial domain context by providing detailed information about data origin...
+2026-10-16 21:57:23,041 [INFO    ]   3. [1.7496] F. Ablation Study An ablation study was performed to evaluate the impact of various modules on overall performance, focu...
+2026-10-16 21:57:23,041 [INFO    ]   ... y 22 más
+2026-10-16 21:57:23,043 [INFO    ] [ClusterEvidences] Guardado en /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/clustered_evidences.json
+2026-10-16 21:57:23,043 [INFO    ] 
+================================================================================
+2026-10-16 21:57:23,043 [INFO    ] 📊 RESUMEN ESTADÍSTICO DE CLUSTERING
+2026-10-16 21:57:23,043 [INFO    ] ================================================================================
+2026-10-16 21:57:23,043 [INFO    ] Concepto 0 [density=0.00]: How are physiological and wearable sensor signals converted into input... — 22 ev, 1 clust, 21 papers
+2026-10-16 21:57:23,043 [INFO    ] Concepto 1 [density=0.00]: How accurately do large language models interpret physiological signal... — 46 ev, 2 clust, 39 papers
+2026-10-16 21:57:23,043 [INFO    ] Concepto 2 [density=0.00]: How are confidence, calibration, uncertainty, hallucination, and factu... — 19 ev, 3 clust, 19 papers
+2026-10-16 21:57:23,043 [INFO    ] Concepto 3 [density=0.00]: Do large language models detect or account for degraded signal quality... — 1 ev, 1 clust, 1 singletons, 1 papers
+2026-10-16 21:57:23,043 [INFO    ] Concepto 4 [density=0.00]: Which interpretability and analysis methods, such as probing classifie... — 4 ev, 1 clust, 4 papers
+2026-10-16 21:57:23,043 [INFO    ] Concepto 5 [density=0.00]: How can physiological signals be integrated into large language model ... — 25 ev, 1 clust, 22 papers
+2026-10-16 21:57:23,043 [INFO    ] --------------------------------------------------------------------------------
+2026-10-16 21:57:23,043 [INFO    ] Total evidencias procesadas: 117
+2026-10-16 21:57:23,043 [INFO    ] Total clusters formados: 9
+2026-10-16 21:57:23,043 [INFO    ] Total singletons: 1 (11.1% del total)
+2026-10-16 21:57:23,043 [INFO    ] Asignaciones paper-concepto: 106 (un mismo paper puede contar en varios conceptos)
+2026-10-16 21:57:23,043 [INFO    ] Papers únicos en el proyecto: 61
+2026-10-16 21:57:23,043 [INFO    ] ================================================================================
+2026-10-16 21:57:23,069 [INFO    ] ------------------------------------------------------------
+2026-10-16 21:57:23,069 [INFO    ] 🚀 [START] Processing processEnrichEvidences
+2026-10-16 21:57:23,070 [INFO    ] [EnrichmentConfig] Configuración activa:
+2026-10-16 21:57:23,070 [INFO    ]   max_section_length:      1500
+2026-10-16 21:57:23,070 [INFO    ]   max_extracted_sentences: 3
+2026-10-16 21:57:23,070 [INFO    ]   llm_fallback:            activado (umbral=0.4)
+2026-10-16 21:57:23,070 [INFO    ]   section_map:
+2026-10-16 21:57:23,070 [INFO    ]     ideas: ['introduction', 'background', 'abstract']
+2026-10-16 21:57:23,070 [INFO    ]     methods: ['methods', 'methodology', 'experimental', 'procedure']
+2026-10-16 21:57:23,070 [INFO    ]     results: ['results', 'findings', 'evaluation']
+2026-10-16 21:57:23,070 [INFO    ]     applications: ['discussion', 'conclusion', 'application']
+2026-10-16 21:57:23,070 [INFO    ]   gap_search_in:    ['ideas']
+2026-10-16 21:57:23,070 [INFO    ]   future_search_in: ['applications', 'results']
+2026-10-16 21:57:23,070 [INFO    ]   signals_list:     40 términos
+2026-10-16 21:57:23,070 [INFO    ]   models_list:      30 términos
+2026-10-16 21:57:23,070 [INFO    ] 📄 JSON loaded from /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/clustered_evidences.json
+2026-10-16 21:57:23,071 [INFO    ] 📄 JSON loaded from /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/papers_text.json
+2026-10-16 21:57:23,133 [INFO    ] [EnrichEvidences] Cargados: 6 conceptos, 64 papers
+2026-10-16 21:57:23,133 [INFO    ] [EnrichmentPipeline] Pasada 1 (regex): 117 evidencias, 61 papers únicos, 6 conceptos
+2026-10-16 21:57:23,406 [INFO    ] [EnrichmentPipeline] Pasada 2 (LLM fallback): cobertura insuficiente en metadatos
+2026-10-16 21:57:23,406 [INFO    ] [LLMFallbackEnricher] Running LLM fallback for 61 papers with incomplete extraction
+2026-10-16 21:57:23,406 [INFO    ] [Factory] Qwen3 detected: bumping num_predict to 2000
+2026-10-16 21:57:23,406 [INFO    ] [LLMFallbackEnricher] LLM client initialized (lazy)
+2026-10-16 21:57:43,983 [DEBUG   ] [LLMFallbackEnricher] ieee_77: gap=True, evolutions=True, signals=2, models=1, metrics=2, usage=True, solution=True
+2026-10-16 21:58:07,216 [DEBUG   ] [LLMFallbackEnricher] ieee_20: gap=False, evolutions=True, signals=3, models=3, metrics=0, usage=True, solution=True
+2026-10-16 21:58:26,367 [DEBUG   ] [LLMFallbackEnricher] ieee_296: gap=True, evolutions=True, signals=2, models=3, metrics=0, usage=True, solution=True
+2026-10-16 21:58:46,814 [DEBUG   ] [LLMFallbackEnricher] pubmed_270: gap=True, evolutions=True, signals=1, models=2, metrics=0, usage=True, solution=True
+2026-10-16 21:59:07,454 [DEBUG   ] [LLMFallbackEnricher] ieee_325: gap=True, evolutions=True, signals=1, models=4, metrics=2, usage=True, solution=True
+2026-10-16 21:59:31,070 [DEBUG   ] [LLMFallbackEnricher] ieee_249: gap=True, evolutions=True, signals=1, models=2, metrics=2, usage=True, solution=True
+2026-10-16 21:59:53,596 [DEBUG   ] [LLMFallbackEnricher] pubmed_30: gap=True, evolutions=True, signals=1, models=1, metrics=0, usage=True, solution=True
+2026-10-16 22:00:12,242 [DEBUG   ] [LLMFallbackEnricher] ieee_24: gap=True, evolutions=True, signals=1, models=2, metrics=0, usage=True, solution=True
+2026-10-16 22:00:45,626 [DEBUG   ] [LLMFallbackEnricher] pubmed_225: gap=True, evolutions=True, signals=2, models=7, metrics=1, usage=True, solution=True
+2026-10-16 22:01:07,677 [DEBUG   ] [LLMFallbackEnricher] ieee_72: gap=True, evolutions=True, signals=5, models=3, metrics=0, usage=True, solution=True
+2026-10-16 22:01:37,239 [DEBUG   ] [LLMFallbackEnricher] pubmed_100: gap=True, evolutions=True, signals=2, models=2, metrics=3, usage=True, solution=True
+2026-10-16 22:01:50,893 [DEBUG   ] [LLMFallbackEnricher] ieee_6: gap=True, evolutions=True, signals=1, models=1, metrics=0, usage=True, solution=True
+2026-10-16 22:02:14,988 [DEBUG   ] [LLMFallbackEnricher] pubmed_77: gap=True, evolutions=True, signals=2, models=1, metrics=3, usage=True, solution=True
+2026-10-16 22:02:32,655 [DEBUG   ] [LLMFallbackEnricher] pubmed_211: gap=True, evolutions=True, signals=1, models=3, metrics=0, usage=True, solution=True
+2026-10-16 22:02:55,898 [DEBUG   ] [LLMFallbackEnricher] ieee_53: gap=True, evolutions=True, signals=2, models=2, metrics=1, usage=True, solution=True
+2026-10-16 22:03:32,670 [DEBUG   ] [LLMFallbackEnricher] ieee_25: gap=True, evolutions=True, signals=3, models=2, metrics=2, usage=True, solution=True
+2026-10-16 22:03:52,234 [DEBUG   ] [LLMFallbackEnricher] pubmed_16: gap=True, evolutions=True, signals=1, models=3, metrics=1, usage=True, solution=True
+2026-10-16 22:04:14,464 [DEBUG   ] [LLMFallbackEnricher] pubmed_216: gap=True, evolutions=True, signals=1, models=2, metrics=1, usage=True, solution=True
+2026-10-16 22:04:37,412 [DEBUG   ] [LLMFallbackEnricher] pubmed_107: gap=True, evolutions=True, signals=1, models=1, metrics=0, usage=True, solution=True
+2026-10-16 22:05:04,232 [DEBUG   ] [LLMFallbackEnricher] ieee_328: gap=True, evolutions=True, signals=1, models=0, metrics=2, usage=True, solution=True
+2026-10-16 22:05:30,514 [DEBUG   ] [LLMFallbackEnricher] pubmed_56: gap=True, evolutions=True, signals=3, models=1, metrics=1, usage=True, solution=True
+2026-10-16 22:05:48,789 [DEBUG   ] [LLMFallbackEnricher] pubmed_2: gap=True, evolutions=True, signals=4, models=2, metrics=2, usage=True, solution=True
+2026-10-16 22:06:03,274 [DEBUG   ] [LLMFallbackEnricher] ieee_58: gap=True, evolutions=True, signals=1, models=1, metrics=0, usage=True, solution=True
+2026-10-16 22:06:22,927 [DEBUG   ] [LLMFallbackEnricher] ieee_60: gap=True, evolutions=True, signals=3, models=2, metrics=0, usage=True, solution=True
+2026-10-16 22:06:42,316 [DEBUG   ] [LLMFallbackEnricher] pubmed_248: gap=True, evolutions=True, signals=0, models=3, metrics=0, usage=True, solution=False
+2026-10-16 22:07:05,678 [DEBUG   ] [LLMFallbackEnricher] pubmed_227: gap=True, evolutions=True, signals=0, models=2, metrics=4, usage=True, solution=True
+2026-10-16 22:07:35,983 [DEBUG   ] [LLMFallbackEnricher] ieee_197: gap=True, evolutions=True, signals=3, models=4, metrics=1, usage=True, solution=True
+2026-10-16 22:07:58,816 [DEBUG   ] [LLMFallbackEnricher] ieee_267: gap=True, evolutions=True, signals=2, models=4, metrics=2, usage=True, solution=True
+2026-10-16 22:08:26,537 [DEBUG   ] [LLMFallbackEnricher] ieee_217: gap=True, evolutions=True, signals=3, models=1, metrics=1, usage=True, solution=True
+2026-10-16 22:08:50,436 [DEBUG   ] [LLMFallbackEnricher] pubmed_289: gap=True, evolutions=True, signals=0, models=3, metrics=1, usage=True, solution=True
+2026-10-16 22:09:20,819 [DEBUG   ] [LLMFallbackEnricher] pubmed_83: gap=True, evolutions=True, signals=4, models=2, metrics=0, usage=True, solution=True
+2026-10-16 22:09:53,136 [DEBUG   ] [LLMFallbackEnricher] ieee_86: gap=True, evolutions=True, signals=3, models=1, metrics=3, usage=True, solution=True
+2026-10-16 22:10:16,599 [DEBUG   ] [LLMFallbackEnricher] ieee_63: gap=True, evolutions=True, signals=1, models=5, metrics=1, usage=True, solution=True
+2026-10-16 22:10:39,961 [DEBUG   ] [LLMFallbackEnricher] pubmed_8: gap=True, evolutions=True, signals=1, models=0, metrics=0, usage=True, solution=True
+2026-10-16 22:11:01,119 [DEBUG   ] [LLMFallbackEnricher] ieee_161: gap=True, evolutions=True, signals=1, models=2, metrics=1, usage=True, solution=True
+2026-10-16 22:11:16,372 [DEBUG   ] [LLMFallbackEnricher] pubmed_60: gap=True, evolutions=True, signals=1, models=1, metrics=0, usage=True, solution=True
+2026-10-16 22:11:35,152 [DEBUG   ] [LLMFallbackEnricher] ieee_18: gap=True, evolutions=True, signals=1, models=1, metrics=0, usage=True, solution=True
+2026-10-16 22:11:54,330 [DEBUG   ] [LLMFallbackEnricher] pubmed_246: gap=False, evolutions=True, signals=1, models=3, metrics=2, usage=True, solution=True
+2026-10-16 22:12:25,288 [DEBUG   ] [LLMFallbackEnricher] pubmed_329: gap=True, evolutions=True, signals=1, models=3, metrics=5, usage=True, solution=True
+2026-10-16 22:12:47,831 [DEBUG   ] [LLMFallbackEnricher] pubmed_133: gap=True, evolutions=True, signals=0, models=2, metrics=0, usage=True, solution=True
+2026-10-16 22:13:14,656 [DEBUG   ] [LLMFallbackEnricher] pubmed_154: gap=True, evolutions=True, signals=1, models=2, metrics=4, usage=True, solution=True
+2026-10-16 22:13:36,432 [DEBUG   ] [LLMFallbackEnricher] pubmed_467: gap=True, evolutions=True, signals=3, models=4, metrics=0, usage=True, solution=True
+2026-10-16 22:14:00,233 [DEBUG   ] [LLMFallbackEnricher] ieee_12: gap=True, evolutions=True, signals=1, models=3, metrics=1, usage=True, solution=True
+2026-10-16 22:14:25,117 [DEBUG   ] [LLMFallbackEnricher] ieee_124: gap=True, evolutions=True, signals=1, models=4, metrics=0, usage=True, solution=True
+2026-10-16 22:14:47,395 [DEBUG   ] [LLMFallbackEnricher] pubmed_229: gap=True, evolutions=True, signals=1, models=1, metrics=4, usage=True, solution=True
+2026-10-16 22:15:08,925 [DEBUG   ] [LLMFallbackEnricher] pubmed_36: gap=True, evolutions=True, signals=0, models=6, metrics=2, usage=True, solution=True
+2026-10-16 22:15:31,210 [DEBUG   ] [LLMFallbackEnricher] pubmed_39: gap=True, evolutions=False, signals=1, models=8, metrics=2, usage=True, solution=True
+2026-10-16 22:15:58,981 [DEBUG   ] [LLMFallbackEnricher] pubmed_138: gap=True, evolutions=True, signals=1, models=2, metrics=3, usage=True, solution=True
+2026-10-16 22:16:25,592 [DEBUG   ] [LLMFallbackEnricher] pubmed_188: gap=True, evolutions=True, signals=0, models=4, metrics=3, usage=True, solution=True
+2026-10-16 22:16:50,573 [DEBUG   ] [LLMFallbackEnricher] ieee_16: gap=True, evolutions=True, signals=1, models=1, metrics=1, usage=True, solution=True
+2026-10-16 22:17:11,157 [DEBUG   ] [LLMFallbackEnricher] pubmed_17: gap=True, evolutions=True, signals=1, models=0, metrics=2, usage=True, solution=True
+2026-10-16 22:17:31,076 [DEBUG   ] [LLMFallbackEnricher] ieee_337: gap=True, evolutions=True, signals=3, models=5, metrics=0, usage=True, solution=True
+2026-10-16 22:17:46,760 [DEBUG   ] [LLMFallbackEnricher] pubmed_19: gap=False, evolutions=True, signals=1, models=0, metrics=0, usage=True, solution=True
+2026-10-16 22:18:12,935 [DEBUG   ] [LLMFallbackEnricher] pubmed_80: gap=True, evolutions=True, signals=3, models=3, metrics=2, usage=True, solution=True
+2026-10-16 22:18:45,735 [DEBUG   ] [LLMFallbackEnricher] pubmed_232: gap=True, evolutions=True, signals=1, models=8, metrics=1, usage=True, solution=True
+2026-10-16 22:19:06,209 [DEBUG   ] [LLMFallbackEnricher] ieee_180: gap=True, evolutions=True, signals=1, models=3, metrics=0, usage=True, solution=True
+2026-10-16 22:19:28,422 [DEBUG   ] [LLMFallbackEnricher] pubmed_210: gap=True, evolutions=True, signals=2, models=3, metrics=0, usage=True, solution=True
+2026-10-16 22:19:52,512 [DEBUG   ] [LLMFallbackEnricher] ieee_19: gap=True, evolutions=True, signals=2, models=3, metrics=5, usage=True, solution=True
+2026-10-16 22:20:17,429 [DEBUG   ] [LLMFallbackEnricher] ieee_131: gap=True, evolutions=True, signals=5, models=2, metrics=0, usage=True, solution=True
+2026-10-16 22:20:36,951 [DEBUG   ] [LLMFallbackEnricher] pubmed_253: gap=True, evolutions=True, signals=0, models=2, metrics=0, usage=True, solution=True
+2026-10-16 22:20:55,990 [DEBUG   ] [LLMFallbackEnricher] ieee_366: gap=True, evolutions=True, signals=1, models=3, metrics=0, usage=True, solution=True
+2026-10-16 22:20:55,990 [INFO    ] [LLMFallbackEnricher] Completed: 61/61 improved
+2026-10-16 22:20:56,003 [INFO    ] 
+======================================================================
+2026-10-16 22:20:56,003 [INFO    ] DIAGNÓSTICO DE CALIDAD — enrich_evidences
+2026-10-16 22:20:56,003 [INFO    ] ======================================================================
+2026-10-16 22:20:56,004 [INFO    ] [ExtractionCache] 61 papers extraídos, 56 hits de caché (48% ahorro)
+2026-10-16 22:20:56,004 [INFO    ] [LLM fallback] 61 papers mejorados por LLM
+2026-10-16 22:20:56,004 [INFO    ] 
+📄 SECCIONES TEXTUALES (extraídas por dict lookup) — 61 papers:
+2026-10-16 22:20:56,004 [INFO    ]   ✓ ideas          :  61/61 ( 100%) ████████████████████
+2026-10-16 22:20:56,004 [INFO    ]   ✓ methods        :  60/61 (  98%) ███████████████████░
+2026-10-16 22:20:56,004 [INFO    ]   ✓ results        :  61/61 ( 100%) ████████████████████
+2026-10-16 22:20:56,004 [INFO    ]   ✓ applications   :  53/61 (  87%) █████████████████░░░
+2026-10-16 22:20:56,004 [INFO    ] 
+🏷️  METADATOS (extraídos por regex + LLM fallback) — 61 papers:
+2026-10-16 22:20:56,004 [INFO    ]   ✓ gap            :  58/61 (  95%) ███████████████████░
+2026-10-16 22:20:56,005 [INFO    ]   ✓ evolutions     :  60/61 (  98%) ███████████████████░
+2026-10-16 22:20:56,005 [INFO    ]   ✓ signals        :  55/61 (  90%) ██████████████████░░
+2026-10-16 22:20:56,005 [INFO    ]   ✓ models         :  59/61 (  97%) ███████████████████░
+2026-10-16 22:20:56,005 [INFO    ]   ✓ metrics        :  61/61 ( 100%) ████████████████████
+2026-10-16 22:20:56,005 [INFO    ]   ✓ limitations    :  58/61 (  95%) ███████████████████░
+2026-10-16 22:20:56,005 [INFO    ]   ✓ usage          :  61/61 ( 100%) ████████████████████
+2026-10-16 22:20:56,005 [INFO    ]   ✓ solution       :  60/61 (  98%) ███████████████████░
+2026-10-16 22:20:56,005 [INFO    ] 
+📊 Distribución de evidencias (117 total):
+2026-10-16 22:20:56,005 [INFO    ]   Ricas  (≥6 campos): 117  (100%)
+2026-10-16 22:20:56,005 [INFO    ]   Parcia (1-5):     0 (0%)
+2026-10-16 22:20:56,005 [INFO    ]   Vacías (0):       0 (0%)
+2026-10-16 22:20:56,005 [INFO    ] ======================================================================
+2026-10-16 22:20:56,038 [INFO    ] 💾 JSON written to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/enriched_evidences.json
+2026-10-16 22:20:56,117 [INFO    ] ------------------------------------------------------------
+2026-10-16 22:20:56,118 [INFO    ] 🚀 [START] Processing processSynthesizeFindings
+2026-10-16 22:20:56,118 [INFO    ] 📄 JSON loaded from /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/enriched_evidences.json
+2026-10-16 22:20:56,158 [INFO    ] 📄 JSON loaded from /home/vant/Documentos/proyectos/LSI/SLIP/results/input/SensoresACL/studyDescription.json
+2026-10-16 22:20:56,158 [INFO    ] [ModelRegistry] Loading embedding model: BAAI/bge-base-en-v1.5
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights:   9%|▉         | 18/199 [00:00<00:02, 88.96it/s]Loading weights:  30%|███       | 60/199 [00:00<00:00, 218.12it/s]Loading weights:  44%|████▎     | 87/199 [00:00<00:00, 208.94it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 436.16it/s]
+2026-10-16 22:21:02,825 [INFO    ] [Factory] Qwen3 detected: bumping num_predict to 2000
+2026-10-16 22:21:02,825 [INFO    ] [SynthesisPipeline] Generating findings for 6 concepts...
+2026-10-16 22:24:23,171 [INFO    ] [ConceptSynthesizer] Concept 0: 3 raw → 1 filtered findings | 22 evidences
+2026-10-16 22:27:54,678 [INFO    ] [ConceptSynthesizer] Concept 1: 6 raw → 1 filtered findings | 46 evidences
+2026-10-16 22:29:57,509 [INFO    ] [ConceptSynthesizer] Concept 2: 4 raw → 1 filtered findings | 19 evidences
+2026-10-16 22:30:06,867 [INFO    ] [ConceptSynthesizer] Concept 3: 1 raw → 1 filtered findings | 1 evidences
+2026-10-16 22:31:03,017 [INFO    ] [ConceptSynthesizer] Concept 4: 1 raw → 1 filtered findings | 4 evidences
+2026-10-16 22:33:41,696 [INFO    ] [ConceptSynthesizer] Concept 5: 3 raw → 1 filtered findings | 25 evidences
+2026-10-16 22:33:41,696 [INFO    ] ============================================================
+2026-10-16 22:33:41,696 [INFO    ] SYNTHESIS SUMMARY
+2026-10-16 22:33:41,696 [INFO    ] ============================================================
+2026-10-16 22:33:41,696 [INFO    ] Concept 0: How are physiological and wearable sensor signals converted  | 1 findings | 22 evidences
+2026-10-16 22:33:41,696 [INFO    ]   Signals: ECG, EEG
+2026-10-16 22:33:41,696 [INFO    ]   Models:  SHOP3 planner
+2026-10-16 22:33:41,696 [INFO    ]   Metrics: precision: 0.89-0.98, F1-score: 0.97-0.98
+2026-10-16 22:33:41,696 [INFO    ]   Solution: This work introduces a hybrid architecture that combines large language model interpretation with hierarchical task network planning to translate natu...
+2026-10-16 22:33:41,696 [INFO    ]   Finding 1: The conversion of physiological and wearable sensor signals into inputs for large language models in...
+2026-10-16 22:33:41,696 [INFO    ] Concept 1: How accurately do large language models interpret physiologi | 1 findings | 46 evidences
+2026-10-16 22:33:41,696 [INFO    ]   Signals: Bedtime, ECG, EEG, EMG, EOG ...
+2026-10-16 22:33:41,696 [INFO    ]   Models:  ChatGPT 5.2, ChatGPT-4o, DL, DeepSeek V3.2, DeepSeek-v3 ...
+2026-10-16 22:33:41,696 [INFO    ]   Metrics: accuracy,: 120%, rocessed,: 3%, rocessing: 300%, Accuracy: 80%, Area under ROC curve: 60%, rocess: 2
+2026-10-16 22:33:41,696 [INFO    ]   Solution: MedTsLLM represents a significant methodological advancement toward developing true foundation models for biomedical signal analysis by successfully i...
+2026-10-16 22:33:41,697 [INFO    ]   Finding 1: This review highlights the potential of large language models (LLMs) to interpret physiological sign...
+2026-10-16 22:33:41,697 [INFO    ] Concept 2: How are confidence, calibration, uncertainty, hallucination, | 1 findings | 19 evidences
+2026-10-16 22:33:41,697 [INFO    ]   Signals: CGM, ECG, EEG, Fitbit metrics (e.g., heart rate, sleep, circadian rhythm), Resting heart rate ...
+2026-10-16 22:33:41,697 [INFO    ]   Models:  ChatGPT-4, ChatGPT-5, Claude Opus-4.1, Claude Sonnet-4, ConMIL ...
+2026-10-16 22:33:41,697 [INFO    ]   Metrics: accuracy,: 1%, rocedures: 20240215%, accuracy: not explicitly stated, precision on confident samples
+2026-10-16 22:33:41,697 [INFO    ]   Solution: MedTsLLM represents a significant methodological advancement toward developing true foundation models for biomedical signal analysis by successfully i...
+2026-10-16 22:33:41,697 [INFO    ]   Finding 1: This body of work explores methods for measuring confidence, calibration, and uncertainty in large l...
+2026-10-16 22:33:41,697 [INFO    ] Concept 3: Do large language models detect or account for degraded sign | 1 findings | 1 evidences
+2026-10-16 22:33:41,697 [INFO    ]   Signals: MEPs
+2026-10-16 22:33:41,697 [INFO    ]   Models:  
+2026-10-16 22:33:41,697 [INFO    ]   Metrics: ICC: 0.63, r: 0.35 and 0.50
+2026-10-16 22:33:41,697 [INFO    ]   Solution: Using event-related spectral perturbation (ERSP) and inter-trial coherence (ITC) to analyze MEPs provides additional insights into corticospinal trans...
+2026-10-16 22:33:41,697 [INFO    ]   Finding 1: The evidence indicates that large language models do not explicitly account for degraded signal qual...
+2026-10-16 22:33:41,697 [INFO    ] Concept 4: Which interpretability and analysis methods, such as probing | 1 findings | 4 evidences
+2026-10-16 22:33:41,697 [INFO    ]   Signals: EEG, acoustic, eye movements, fixations, linguistic ...
+2026-10-16 22:33:41,697 [INFO    ]   Models:  Beam search, Greedy search, LLM (Large language models)-integrated communication aids, Mistral, Phi-2 ...
+2026-10-16 22:33:41,697 [INFO    ]   Metrics: accuracy: 4%, accuracy.: 26%, rocess: 55%, pmi: positive values help predict patterns of regressions
+2026-10-16 22:33:41,697 [INFO    ]   Solution: A language-model-assisted EEG-based letter-by-letter typing BCI utilizing three different presentation paradigms.; Multimodal frameworks that integrat...
+2026-10-16 22:33:41,697 [INFO    ]   Finding 1: The integration of EEG data with language structure for decision-making and target detection has bee...
+2026-10-16 22:33:41,697 [INFO    ] Concept 5: How can physiological signals be integrated into large langu | 1 findings | 25 evidences
+2026-10-16 22:33:41,697 [INFO    ]   Signals: ECG, EEG
+2026-10-16 22:33:41,697 [INFO    ]   Models:  SHOP3 planner
+2026-10-16 22:33:41,697 [INFO    ]   Metrics: precision: 0.89-0.98, F1-score: 0.97-0.98
+2026-10-16 22:33:41,697 [INFO    ]   Solution: This work introduces a hybrid architecture that combines large language model interpretation with hierarchical task network planning to translate natu...
+2026-10-16 22:33:41,697 [INFO    ]   Finding 1: The integration of physiological signals into large language model pipelines is not explicitly detai...
+2026-10-16 22:33:41,697 [INFO    ] ============================================================
+2026-10-16 22:33:41,739 [INFO    ] 💾 JSON written to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/concept_findings.json
+2026-10-16 22:33:41,790 [INFO    ] ------------------------------------------------------------
+2026-10-16 22:33:41,790 [INFO    ] 🚀 [START] Processing processGenerateTechnicalAnnex
+2026-10-16 22:33:41,822 [INFO    ] [TechnicalAnnex] Loaded concept_findings.json for paper filtering.
+2026-10-16 22:33:41,823 [INFO    ] [TechnicalAnnex] 17 extraction fields loaded. Max tokens: 4096, Temp: 0.1
+2026-10-16 22:33:41,823 [INFO    ] [Factory] Qwen3 detected: bumping num_predict to 2000
+2026-10-16 22:33:42,094 [INFO    ] [PaperSelector] Concept 0: 21 with evidence + 0 others = 21 total
+2026-10-16 22:33:42,094 [INFO    ] [PaperSelector] Concept 1: 39 with evidence + 3 others = 42 total
+2026-10-16 22:33:42,094 [INFO    ] [PaperSelector] Concept 2: 19 with evidence + 0 others = 19 total
+2026-10-16 22:33:42,094 [INFO    ] [PaperSelector] Concept 3: 1 with evidence + 0 others = 1 total
+2026-10-16 22:33:42,094 [INFO    ] [PaperSelector] Concept 4: 4 with evidence + 0 others = 4 total
+2026-10-16 22:33:42,094 [INFO    ] [PaperSelector] Concept 5: 22 with evidence + 0 others = 22 total
+2026-10-16 22:33:42,094 [INFO    ] [TechnicalAnnex] Unique papers to process: 64
+Extrayendo perfiles técnicos:   0%|          | 0/64 [00:00<?, ?paper/s]Extrayendo perfiles técnicos:   2%|▏         | 1/64 [00:38<40:47, 38.85s/paper]Extrayendo perfiles técnicos:   3%|▎         | 2/64 [01:08<34:21, 33.25s/paper]Extrayendo perfiles técnicos:   5%|▍         | 3/64 [01:37<31:55, 31.40s/paper]Extrayendo perfiles técnicos:   6%|▋         | 4/64 [02:12<33:03, 33.05s/paper]Extrayendo perfiles técnicos:   8%|▊         | 5/64 [02:57<36:29, 37.10s/paper]Extrayendo perfiles técnicos:   9%|▉         | 6/64 [03:35<36:14, 37.48s/paper]Extrayendo perfiles técnicos:  11%|█         | 7/64 [04:08<34:05, 35.89s/paper]Extrayendo perfiles técnicos:  12%|█▎        | 8/64 [04:45<34:04, 36.51s/paper]Extrayendo perfiles técnicos:  14%|█▍        | 9/64 [05:27<34:52, 38.05s/paper]Extrayendo perfiles técnicos:  16%|█▌        | 10/64 [05:53<30:56, 34.38s/paper]Extrayendo perfiles técnicos:  17%|█▋        | 11/64 [06:34<32:05, 36.34s/paper]Extrayendo perfiles técnicos:  19%|█▉        | 12/64 [07:33<37:38, 43.43s/paper]Extrayendo perfiles técnicos:  20%|██        | 13/64 [08:18<37:08, 43.69s/paper]Extrayendo perfiles técnicos:  22%|██▏       | 14/64 [08:55<34:47, 41.74s/paper]Extrayendo perfiles técnicos:  23%|██▎       | 15/64 [09:29<32:04, 39.27s/paper]Extrayendo perfiles técnicos:  25%|██▌       | 16/64 [10:10<31:58, 39.96s/paper]Extrayendo perfiles técnicos:  27%|██▋       | 17/64 [10:45<30:01, 38.33s/paper]Extrayendo perfiles técnicos:  28%|██▊       | 18/64 [11:19<28:26, 37.09s/paper]Extrayendo perfiles técnicos:  30%|██▉       | 19/64 [11:52<26:57, 35.94s/paper]Extrayendo perfiles técnicos:  31%|███▏      | 20/64 [12:21<24:45, 33.76s/paper]2026-10-16 22:47:02,529 [WARNING ] [Extractor] Partial echo in 'llm_models': pruning example items, keeping extracted specifics
+Extrayendo perfiles técnicos:  33%|███▎      | 21/64 [13:21<29:52, 41.69s/paper]Extrayendo perfiles técnicos:  34%|███▍      | 22/64 [13:50<26:30, 37.86s/paper]Extrayendo perfiles técnicos:  36%|███▌      | 23/64 [14:14<23:04, 33.76s/paper]Extrayendo perfiles técnicos:  38%|███▊      | 24/64 [14:51<23:09, 34.73s/paper]Extrayendo perfiles técnicos:  39%|███▉      | 25/64 [15:27<22:48, 35.10s/paper]Extrayendo perfiles técnicos:  41%|████      | 26/64 [16:09<23:30, 37.11s/paper]Extrayendo perfiles técnicos:  42%|████▏     | 27/64 [16:37<21:12, 34.39s/paper]Extrayendo perfiles técnicos:  44%|████▍     | 28/64 [17:17<21:38, 36.08s/paper]Extrayendo perfiles técnicos:  45%|████▌     | 29/64 [17:55<21:19, 36.57s/paper]Extrayendo perfiles técnicos:  47%|████▋     | 30/64 [18:37<21:44, 38.36s/paper]Extrayendo perfiles técnicos:  48%|████▊     | 31/64 [19:20<21:51, 39.75s/paper]Extrayendo perfiles técnicos:  50%|█████     | 32/64 [19:51<19:43, 36.97s/paper]Extrayendo perfiles técnicos:  52%|█████▏    | 33/64 [20:24<18:28, 35.76s/paper]Extrayendo perfiles técnicos:  53%|█████▎    | 34/64 [21:21<21:11, 42.39s/paper]Extrayendo perfiles técnicos:  55%|█████▍    | 35/64 [22:08<21:03, 43.58s/paper]Extrayendo perfiles técnicos:  56%|█████▋    | 36/64 [22:49<19:58, 42.80s/paper]Extrayendo perfiles técnicos:  58%|█████▊    | 37/64 [23:22<18:01, 40.05s/paper]Extrayendo perfiles técnicos:  59%|█████▉    | 38/64 [23:54<16:16, 37.57s/paper]Extrayendo perfiles técnicos:  61%|██████    | 39/64 [24:27<15:00, 36.01s/paper]2026-10-16 22:58:51,316 [WARNING ] [Extractor] Echo detected in 'adaptation_strategy': value repeats the field description/examples; resetting
+Extrayendo perfiles técnicos:  62%|██████▎   | 40/64 [25:10<15:17, 38.22s/paper]Extrayendo perfiles técnicos:  64%|██████▍   | 41/64 [25:41<13:48, 36.01s/paper]Extrayendo perfiles técnicos:  66%|██████▌   | 42/64 [26:17<13:11, 36.00s/paper]Extrayendo perfiles técnicos:  67%|██████▋   | 43/64 [26:51<12:22, 35.36s/paper]Extrayendo perfiles técnicos:  69%|██████▉   | 44/64 [27:22<11:23, 34.19s/paper]Extrayendo perfiles técnicos:  70%|███████   | 45/64 [27:56<10:48, 34.11s/paper]Extrayendo perfiles técnicos:  72%|███████▏  | 46/64 [28:43<11:21, 37.84s/paper]Extrayendo perfiles técnicos:  73%|███████▎  | 47/64 [29:17<10:24, 36.71s/paper]Extrayendo perfiles técnicos:  75%|███████▌  | 48/64 [30:00<10:21, 38.83s/paper]Extrayendo perfiles técnicos:  77%|███████▋  | 49/64 [30:44<10:01, 40.12s/paper]Extrayendo perfiles técnicos:  78%|███████▊  | 50/64 [31:17<08:53, 38.09s/paper]Extrayendo perfiles técnicos:  80%|███████▉  | 51/64 [31:59<08:30, 39.26s/paper]2026-10-16 23:06:15,661 [WARNING ] [Extractor] Echo detected in 'task_type': value repeats the field description/examples; resetting
+Extrayendo perfiles técnicos:  81%|████████▏ | 52/64 [32:34<07:36, 38.04s/paper]Extrayendo perfiles técnicos:  83%|████████▎ | 53/64 [33:18<07:16, 39.69s/paper]Extrayendo perfiles técnicos:  84%|████████▍ | 54/64 [33:52<06:19, 38.00s/paper]Extrayendo perfiles técnicos:  86%|████████▌ | 55/64 [34:31<05:45, 38.43s/paper]2026-10-16 23:09:01,081 [WARNING ] [Extractor] Partial echo in 'llm_models': pruning example items, keeping extracted specifics
+Extrayendo perfiles técnicos:  88%|████████▊ | 56/64 [35:19<05:31, 41.42s/paper]Extrayendo perfiles técnicos:  89%|████████▉ | 57/64 [35:51<04:30, 38.58s/paper]Extrayendo perfiles técnicos:  91%|█████████ | 58/64 [36:21<03:35, 35.98s/paper]Extrayendo perfiles técnicos:  92%|█████████▏| 59/64 [36:49<02:47, 33.40s/paper]Extrayendo perfiles técnicos:  94%|█████████▍| 60/64 [37:18<02:08, 32.24s/paper]Extrayendo perfiles técnicos:  95%|█████████▌| 61/64 [37:50<01:35, 32.00s/paper]Extrayendo perfiles técnicos:  97%|█████████▋| 62/64 [38:32<01:09, 35.00s/paper]Extrayendo perfiles técnicos:  98%|█████████▊| 63/64 [39:02<00:33, 33.46s/paper]Extrayendo perfiles técnicos: 100%|██████████| 64/64 [39:32<00:00, 32.50s/paper]Extrayendo perfiles técnicos: 100%|██████████| 64/64 [39:32<00:00, 37.07s/paper]
+2026-10-16 23:13:14,451 [INFO    ] [TechnicalAnnex] Processed 64 papers. Empty profiles: 0
+2026-10-16 23:13:14,472 [INFO    ] [TechnicalAnnex] Saved to /home/vant/Documentos/proyectos/LSI/SLIP/results/output/SensoresACL/technical_annex.json
+2026-10-16 23:13:14,864 [INFO    ] ------------------------------------------------------------
+2026-10-16 23:13:14,864 [INFO    ] 🚀 [START] Processing processTrainingMaterials
+2026-10-16 23:13:15,866 [INFO    ] 🚫 Blacklist papers_text: 0 eliminados
+2026-10-16 23:13:15,866 [INFO    ] 🚫 Blacklist metadata_lookup: 0 eliminados
+2026-10-16 23:13:15,866 [INFO    ] 🚫 Blacklist selected: 0 eliminados
+2026-10-16 23:13:15,866 [INFO    ] 🚫 Blacklist missing: 0 eliminados
+2026-10-16 23:13:15,868 [INFO    ] [TrainingMaterials] Flags: manuscript=0, emergente=1
+Traceback (most recent call last):
+  File "/home/vant/Documentos/proyectos/LSI/SLIP/main.py", line 131, in <module>
+    result = mainProcess()
+             ^^^^^^^^^^^^^
+  File "/home/vant/Documentos/proyectos/LSI/SLIP/main.py", line 103, in mainProcess
+    processTrainingMaterials()
+  File "/home/vant/Documentos/proyectos/LSI/SLIP/sources/trainingMaterials.py", line 1530, in processTrainingMaterials
+    defaults = getattr(processControl, "defaults", None) or {}
+                       ^^^^^^^^^^^^^^
+NameError: name 'processControl' is not defined

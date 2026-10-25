@@ -39,7 +39,7 @@ from sources.common.utils import inicioModulo, read_json
 MAX_PAPERS_PER_NOTEBOOK = 50      # fuentes por cuaderno
 MAX_NOTEBOOKS = 50                # número máximo de archivos (cuadernos)
 MAX_FILE_BYTES = 200 * 1024 * 1024  # 200 MB por archivo
-MAX_WORDS_PER_PAPER = 500_000     # palabras por fuente (paper)
+MAX_WORDS_PER_PAPER = 300_000     # palabras por fuente (paper)
 
 
 def _slugify_title(title: str, paper_id: str) -> str:
@@ -106,9 +106,14 @@ def _build_paper_block(paper: dict, text_lookup: dict[str, dict],
     # Obtener texto completo: priorizar clean_text, luego unir secciones
     pt = text_lookup.get(paper_id, {})
     clean_text = pt.get("clean_text") or ""
+    sections = pt.get("clean_sections", {}) or {}
 
-    if not clean_text.strip():
-        sections = pt.get("clean_sections", {}) or {}
+    # Si clean_text está vacío o es más corto que la suma de las secciones,
+    # reconstruirlo a partir de las secciones estructuradas (evita papers
+    # truncados por cortes prematuros de referencias/bibliografía).
+    sections_words = sum(len(str(val).split()) for val in sections.values() if val)
+    if (not clean_text.strip()
+            or len(clean_text.split()) < sections_words):
         parts = []
         for section_name in ("abstract", "introduction", "methodology",
                              "results", "conclusion", "figures_tables_captions"):

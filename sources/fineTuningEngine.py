@@ -583,8 +583,8 @@ def processFineTuning(subject: Optional[str] = None) -> Dict[str, Any]:
         writeLog("info", logger,
                  f"[FineTuning] Checksum guardado para detección de cambios futuros.")
         writeLog("info", logger,
-                 f"[FineTuning] 🔄 Se recomienda reiniciar el pipeline para que discoveryEngine "
-                 f"use este modelo fine-tuneado en lugar del modelo base.")
+                 f"[FineTuning] 📢 El modelo fine-tuneado estará disponible para discoveryEngine "
+                 f"en una pasada posterior del pipeline.")
     else:
         writeLog("error", logger, "[FineTuning] ❌ Falló el fine-tuning.")
         result["fine_tuning_generated"] = False

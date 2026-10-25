@@ -1,0 +1,43 @@
+
+
+## Fiabilidad del estudio
+
+1. **Las columnas del anexo técnico están contaminadas por mis ejemplos.** La misma cadena de "robustez" (ruido, artefactos de movimiento, canal plano, desincronización, SQI) aparece 15 veces y la de "alucinación" 24 veces, idénticas, en artículos que no tienen nada que ver. Una revisión de demencia y una revisión narrativa de cardiología deportiva figuran como si hubieran inyectado ruido y hecho sondas, y no es así. Son los `examples` de `studyDescription.json` copiados como valores extraídos, y eso afecta también a "confianza", "interpretabilidad" y a parte de "limitaciones" (por ejemplo, "falta de evaluación de la calibración"). Hay que corregirlo en la plantilla: sin ejemplos, o con instrucción explícita de usar "no reportado" y citar la frase fuente.
+
+3. **La clasificación falla en los dos sentidos.** Se incluyó en cuatro conceptos un trabajo de estadística del lenguaje natural (n-gramas), que no es fisiológico, mientras que quedaron fuera de los conceptos trabajos claramente pertinentes: una comparación multimodelo y multirrepresentación de VLM sobre ECG, una interfaz biomarcador-LLM con VFC en tiempo real y un cribado de depresión con razonamiento estadístico aumentado. Revisa los 54 excluidos.
+4. **Dos DOI parecen incorrectos** (el de un artículo sobre selección de ejemplos con LLM y el del VQA de ECG apuntan a revistas que no corresponden). Verifica los DOI antes de citar.
+
+Lo que sigue se apoya solo en el texto de los propios artículos.
+
+## Qué evidencia hay y qué temas dominan
+
+De las 17 fuentes que el pipeline cita, unas siete son de ECG, cuatro de estrés, afecto o salud mental, dos de salud personal (sueño y fitness) y el resto son otros casos aislados. Domina la literatura clínica y de ingeniería (IEEE Sensors, PubMed). WESAD aparece en un solo estudio relevante; K-EmoCon y EXIST prácticamente no aparecen.
+
+Hallazgos que sí se sostienen en los textos:
+- **Representación:** pasar el ECG a imagen mejora algo la descripción de patrones respiratorios con modelos visión-lenguaje ajustados (BLEU 0,572 frente a 0,549, una métrica de texto y un efecto pequeño). Con LLM y modelos fundacionales de series temporales, las características simples (entropía) resultan competitivas.
+- **Rendimiento:** en WESAD, un Random Forest alcanza 91,13 % de exactitud, y los LLM por prompt dependen mucho de qué biomarcadores se incluyen. En VQA de ECG en zero-shot, los modelos describen mal las características de la imagen y dan descripciones incorrectas con respuestas correctas.
+- **Fiabilidad:** el único método con calibración formal es ConMIL, que combina un modelo pequeño especializado con LLM y predicción conformal.
+- **Arquitectura:** una revisión de cardiología deportiva propone el paradigma "text-proxy": el LLM actúa como capa semántica sobre resultados verificados de sistemas previos, no sobre la señal cruda.
+
+## Huecos y direcciones futuras
+
+Lo que los propios textos piden: más datos y más diversos y mejor generalización entre sujetos; preentrenamiento alineado con el dominio para los modelos de series temporales; evaluar la fidelidad de las explicaciones; arquitecturas híbridas (modelo ligero más interpretación del LLM); y gobernanza centrada en calibración, trazabilidad, auditabilidad y supervisión clínica.
+
+## Efecto sobre tu investigación
+
+| Hipótesis | Lo que muestra el corpus | Estado |
+|---|---|---|
+| El LLM no "ve" la señal y la representación importa | Sostenido por las revisiones y por los resultados de VQA y embeddings | Apoyada |
+| Calibración y abstención apenas se estudian | Solo ConMIL la trata formalmente; varias fuentes la reclaman | Apoyada de forma orientativa |
+| Nadie prueba degradación controlada con LLM | No aparece ningún estudio así | **No concluyente** (cobertura débil: WoS 0, sin arXiv, y dos estudios clave sin recuperar) |
+| La representación modula la robustez | Sin evidencia directa | Abierta, y es tu aportación |
+| Una auditoría externa como puerta previa | Respaldada conceptualmente por text-proxy e híbridos, sin prueba empírica | Alineada y diferenciadora |
+
+Consecuencias de diseño:
+- Incluye siempre una línea base de características simples más un clasificador supervisado. Si el LLM no mejora a un Random Forest en WESAD, el resultado debe contarse.
+- Usa StressLLM sobre WESAD como ancla reproducible y ConMIL como línea base de calibración.
+- El ECG ya está muy trabajado. Tu hueco es más claro con EDA, PPG y acelerometría bajo degradación, en WESAD y K-EmoCon.
+- No afirmes "primer estudio" hasta rehacer la búsqueda.
+- Para un congreso de PLN, falta la literatura propia de ese campo (calibración de la confianza verbalizada, razonamiento numérico y series temporales con LLM, fidelidad de explicaciones), que esta búsqueda no cubre por estar atada a términos fisiológicos. Necesitas un segundo flujo sin ese filtro.
+- El corpus señala también una corriente adyacente muy ACL (modelos de lenguaje y movimientos oculares en lectura, y fiabilidad test-retest de la pupila) conectada con tu línea de pupila.
+

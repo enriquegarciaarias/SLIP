@@ -142,6 +142,8 @@ def normalize_paper(paper: dict, source: str) -> dict:
         "authors_detail": paper.get("authors_detail", []) or [],
         "keywords": paper.get("keywords", []) or [],
         "venue": paper.get("venue", "") or "",
+        "venue_from_doi": paper.get("venue_from_doi", "") or "",
+        "venue_category": paper.get("venue_category", "") or "",
         "document_type": paper.get("document_type", "") or "",
         "language": paper.get("language", "") or "",
         "references_count": safe_int(paper.get("references_count")),
@@ -273,6 +275,8 @@ def merge_group(items: list[dict]) -> dict:
         "authors_detail": _union_list(items, "authors_detail"),
         "keywords": sorted({k for item in items for k in (item.get("keywords") or []) if k}),
         "venue": _longest(items, "venue"),
+        "venue_from_doi": _first_nonempty(items, "venue_from_doi"),
+        "venue_category": _first_nonempty(items, "venue_category"),
         "document_type": _first_nonempty(items, "document_type"),
         "language": _first_nonempty(items, "language"),
         "references_count": max(

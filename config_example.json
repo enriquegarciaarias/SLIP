@@ -4,13 +4,14 @@
       "huggingFaceToken": "REEMPLAZAR_CON_TU_TOKEN_DE_HUGGING_FACE",
       "modelNames": {},
       "search": {
-        "availables": ["wos", "scopus", "ieee", "pubmed", "acm", "arxiv"],
+        "availables": ["wos", "scopus", "ieee", "pubmed", "acm", "arxiv", "acl_anthology"],
         "wos": "wos_export.txt",
         "scopus": "scopus_export.csv",
         "ieee": "ieee_export.csv",
         "pubmed": "pubmed_export.txt",
         "acm": "acm_export.*",
         "arxiv": "arxiv_export.*",
+        "acl_anthology": "acl_anthology_export.*",
         "query_source": "conceptsQuery.json",
         "refresh": false,
         "max_results": 500,
@@ -53,6 +54,12 @@
           },
           "arxiv": {
             "mode": "file"
+          },
+          "acl_anthology": {
+            "mode": "api",
+            "repo_path": "",
+            "min_year": 2022,
+            "max_results": 500
           }
         },
         "abstract_recovery": {
@@ -177,9 +184,8 @@
         "domains": []
       },
       "paper_blacklist": {
-        "_help": "Opcional. IDs de papers a excluir del ranking antes de aplicar top_k. Se alimenta automáticamente desde corpusCleaning (papers con <500 palabras tras limpieza se guardan en low_text_papers.json). El operador puede añadir IDs manualmente aquí para futuras ejecuciones. Ejemplo: {\"ids\": [\"wos_42\", \"scopus_74\"], \"reason\": \"PDFs escaneados, sin texto extraíble\"}",
-        "ids": [],
-        "reason": ""
+        "_help": "Opcional. Lista de papers a excluir del ranking antes de aplicar top_k. Cada entrada tiene 'id', 'reason' (motivo: low_text, operator_rejected, pdf_unreadable, etc.) y 'detail' opcional. Se alimenta automáticamente desde corpusCleaning (low_text) y enrichmentEngine (operator_rejected).",
+        "entries": []
       }
     },
     "environment": {

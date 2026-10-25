@@ -1068,16 +1068,23 @@ class MarkdownRenderer:
     @staticmethod
     def _render_tech_paragraph(paper: Dict) -> str:
         """
-        Renderiza la ficha técnica de un paper como un párrafo legible
-        (sin tabla): "Paper `id`: Campo: valor. Campo: valor. ..."
+        Renderiza la ficha técnica de un paper con título y una línea por
+        apartado en forma de lista de bullets:
+
+        **Paper `scopus_271` — Título del paper**
+        - **Llm models**: valor1, valor2
+        - **Signal modalities**: valor1, valor2
         """
         profile = paper.get("profile") or {}
         paper_id = paper.get("paper_id", "?")
+        title = paper.get("title", "").strip()
 
         if not profile:
-            return f"**Paper `{paper_id}`**: sin datos de perfil técnico.\n"
+            title_part = f" — {title}" if title else ""
+            return f"**Paper `{paper_id}`{title_part}**: sin datos de perfil técnico.\n"
 
-        fields: List[str] = []
+        title_part = f" — {title}" if title else ""
+        lines = [f"**Paper `{paper_id}`{title_part}**"]
         for key, val in profile.items():
             if val in (None, "", [], {}):
                 continue
@@ -1095,11 +1102,12 @@ class MarkdownRenderer:
             else:
                 val_str = str(val)
             val_str = val_str.replace("|", "\\|").replace("\n", " ").strip()
-            fields.append(f"{label}: {val_str}")
+            lines.append(f"- **{label}**: {val_str}")
 
-        if not fields:
-            return f"**Paper `{paper_id}`**: sin datos de perfil técnico.\n"
-        return f"**Paper `{paper_id}`**: " + ". ".join(fields) + ".\n"
+        if len(lines) == 1:
+            title_part = f" — {title}" if title else ""
+            return f"**Paper `{paper_id}`{title_part}**: sin datos de perfil técnico.\n"
+        return "\n".join(lines) + "\n"
 
     # ------------------------------------------------------------------
     # BIBLIOGRAFÍA ENRIQUECIDA CON BIBTEX, DOI Y CITATION COUNT

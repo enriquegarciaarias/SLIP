@@ -203,29 +203,25 @@ if __name__ == '__main__':
     writeLog("info", logger, "********** STARTING Scientific Literature Intelligence Pipeline (SLIP) Process **********")
     getConfigs()
 
-    max_restarts = 1  # Máximo 1 reinicio automático tras generar fine-tuning
-    restart_count = 0
+    if processControl.args.proc == "SLIP":
+        result = mainProcess()
+        fine_tuning_generated = result.get("fine_tuning_generated", False) if result else False
+    else:
+        customProcess()
+        fine_tuning_generated = False
 
-    while restart_count <= max_restarts:
-        if processControl.args.proc == "SLIP":
-            result = mainProcess()
-            fine_tuning_generated = result.get("fine_tuning_generated", False) if result else False
-            server_phase = result.get("server_gpu_phase", "full") if result else "full"
-
-            # Auto-reinicio tras fine-tuning (solo en ejecución completa local o server,
-            # no cuando se usa --step para evitar bucles)
-            if (fine_tuning_generated and restart_count < max_restarts
-                    and server_phase != "start" and not server_phase.startswith("step:")):
-                restart_count += 1
-                writeLog("info", logger,
-                         f"🔄 [AUTO-RESTART] Fine-tuning generado en esta ejecución. "
-                         f"Reiniciando pipeline (paso {restart_count}/{max_restarts}) "
-                         f"para que discoveryEngine use el modelo fine-tuneado...")
-                getConfigs()
-                continue
-        else:
-            customProcess()
-            break
-        break
+    # Aviso al final si se regeneró fine-tuning en esta ejecución.
+    # El operador relanzará el pipeline cuando considere oportuno para aprovechar el nuevo modelo.
+    if fine_tuning_generated:
+        writeLog("info", logger,
+                 "=" * 70)
+        writeLog("info", logger,
+                 "📢 [FINE-TUNING] Se ha regenerado el modelo fine-tuneado en esta ejecución.")
+        writeLog("info", logger,
+                 "   Este modelo podrá ser aprovechado por discoveryEngine en una pasada posterior.")
+        writeLog("info", logger,
+                 "   Relance el pipeline cuando considere oportuno para usar el nuevo modelo.")
+        writeLog("info", logger,
+                 "=" * 70)
 
     writeLog("info", logger, "********** PROCESS COMPLETED **********")

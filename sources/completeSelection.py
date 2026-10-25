@@ -59,6 +59,71 @@ def _load_json(path: Path) -> list[dict] | dict | None:
         return None
 
 
+def _load_paper_blacklist(output_dir: Path) -> dict[str, dict]:
+    """
+    Consolida todas las fuentes de paper_blacklist en un único dict:
+      paper_id -> {"reason": str, "detail": str, "source": str}
+
+    Fuentes (en orden de prioridad):
+      1. config.json > defaults.paper_blacklist.entries
+      2. rejected_papers.json (rechazos del operador durante selección interactiva)
+      3. low_text_papers.json (papers con <500 palabras tras limpieza en corpusCleaning)
+    """
+    blacklist: dict[str, dict] = {}
+
+    # 1) Desde config.json
+    defaults = getattr(processControl, "defaults", None) or {}
+    paper_bl_cfg = defaults.get("paper_blacklist", {}) if isinstance(defaults, dict) else {}
+    for entry in paper_bl_cfg.get("entries", []) or []:
+        pid = entry.get("id")
+        if pid:
+            blacklist[pid] = {
+                "reason": entry.get("reason", "unknown"),
+                "detail": entry.get("detail", ""),
+                "source": "config.json",
+            }
+
+    # 2) Desde rejected_papers.json (operador dijo "N")
+    rejected_file = output_dir / "rejected_papers.json"
+    if rejected_file.exists():
+        try:
+            with open(rejected_file, "r", encoding="utf-8") as f:
+                rejected = json.load(f)
+            if isinstance(rejected, list):
+                for entry in rejected:
+                    pid = entry.get("paper_id")
+                    if pid:
+                        blacklist[pid] = {
+                            "reason": entry.get("reason", "operator_rejected"),
+                            "detail": entry.get("detail", ""),
+                            "source": "operator_rejection",
+                        }
+        except Exception as exc:
+            writeLog("warning", logger,
+                     f"[CompleteSelection] No se pudo leer rejected_papers.json: {exc}")
+
+    # 3) Desde low_text_papers.json (bajo contenido de texto)
+    low_text_file = output_dir / "low_text_papers.json"
+    if low_text_file.exists():
+        try:
+            with open(low_text_file, "r", encoding="utf-8") as f:
+                low_text = json.load(f)
+            if isinstance(low_text, list):
+                for entry in low_text:
+                    pid = entry.get("paper_id")
+                    if pid:
+                        blacklist[pid] = {
+                            "reason": entry.get("reason", "low_text"),
+                            "detail": entry.get("detail", ""),
+                            "source": "corpusCleaning",
+                        }
+        except Exception as exc:
+            writeLog("warning", logger,
+                     f"[CompleteSelection] No se pudo leer low_text_papers.json: {exc}")
+
+    return blacklist
+
+
 def _count_by_strategy_and_source(search_dir: Path, availables: list[str]) -> dict:
     """
     Cuenta registros por fuente y estrategia de búsqueda leyendo los archivos
@@ -110,27 +175,103 @@ def _count_by_strategy_and_source(search_dir: Path, availables: list[str]) -> di
     }
 
 
-# Venues / conferencias objetivo para cuantificación en el informe PRISMA
-PRISMA_TARGET_VENUES = [
-    "ACL", "SIGIR", "ECIR", "EMNLP", "COLING", "WWW",
-    "CKIM", "CONLL", "NAACL", "EACL", "ICTIR",
-]
+# ---------------------------------------------------------------------------
+# Venues / conferencias objetivo para cuantificación en el informe PRISMA.
+# Se leen desde results/input/<subject>/conceptsQuery.json (clave
+# "prisma_target_venues"). Si no se encuentra, se usa una lista por defecto
+# vacía para evitar fallar; el investigador debe configurarlas por subject.
+# ---------------------------------------------------------------------------
+DEFAULT_PRISMA_TARGET_VENUES: list[str] = []
 
 
-def _count_papers_by_venue(selected_papers: list[dict]) -> dict[str, int]:
+def _load_target_venues(input_dir: Path) -> tuple[list[str], dict[str, list[str]]]:
     """
-    Cuenta cuántos papers seleccionados pertenecen a cada venue objetivo.
-    El matching es case-insensitive y por subcadena sobre el campo `venue`.
-    Un paper puede contarse en múltiples venues si su venue menciona varios
-    (poco común pero posible en actas conjuntas).
+    Carga las venues objetivo y sus aliases desde conceptsQuery.json.
+
+    Devuelve una tupla (venues, aliases) donde:
+      - venues: lista de códigos de venue objetivo (ej. ["ACL", "EMNLP", ...])
+      - aliases: diccionario {codigo_venue: [lista de nombres alternativos]}
+
+    Si no existe conceptsQuery.json o no tiene las claves, devuelve listas vacías.
     """
-    counts: dict[str, int] = {v: 0 for v in PRISMA_TARGET_VENUES}
-    for p in selected_papers or []:
+    concepts_file = input_dir / "conceptsQuery.json"
+    venues: list[str] = list(DEFAULT_PRISMA_TARGET_VENUES)
+    aliases: dict[str, list[str]] = {}
+
+    if not concepts_file.exists():
+        writeLog("debug", logger,
+                 f"[CompleteSelection] No se encontró {concepts_file}; usando venues por defecto")
+        return venues, aliases
+
+    try:
+        with open(concepts_file, encoding="utf-8") as f:
+            concepts_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        writeLog("warning", logger,
+                 f"[CompleteSelection] No se pudo leer {concepts_file}: {exc}")
+        return venues, aliases
+
+    venues_from_cfg = concepts_data.get("prisma_target_venues", [])
+    if isinstance(venues_from_cfg, list):
+        venues = [str(v).strip() for v in venues_from_cfg if str(v).strip()]
+
+    aliases_from_cfg = concepts_data.get("prisma_venue_aliases", {})
+    if isinstance(aliases_from_cfg, dict):
+        for k, v in aliases_from_cfg.items():
+            if isinstance(v, list):
+                aliases[str(k).strip()] = [str(a).strip() for a in v if str(a).strip()]
+
+    writeLog("info", logger,
+             f"[CompleteSelection] Venues objetivo cargadas desde conceptsQuery.json: "
+             f"{len(venues)} venues, {sum(len(a) for a in aliases.values())} aliases")
+
+    return venues, aliases
+
+
+def _venue_matches_target(venue_lower: str, target: str, aliases: list[str],
+                          venue_from_doi_lower: str = "") -> bool:
+    """
+    Determina si un venue (ya en minúsculas) coincide con un venue objetivo.
+
+    El matching se hace por:
+      1. Subcadena exacta del código en el venue (ej. "acl" in "proceedings of acl 2024")
+      2. Subcadena de cualquier alias en el venue (ej. "association for computational linguistics" in venue)
+      3. Subcadena exacta del código en venue_from_doi (patrón del DOI, ej. "acl-long" → "acl")
+      4. Coincidencia exacta del venue_from_doi con el target
+    """
+    if target.lower() in venue_lower:
+        return True
+    for alias in aliases:
+        if alias and alias.lower() in venue_lower:
+            return True
+    # Matching contra venue_from_doi (patrón del DOI)
+    if venue_from_doi_lower:
+        if target.lower() in venue_from_doi_lower:
+            return True
+        if venue_from_doi_lower == target.lower():
+            return True
+    return False
+
+
+def _count_venues_by_papers(
+    papers: list[dict],
+    venues: list[str],
+    aliases: dict[str, list[str]],
+) -> dict[str, int]:
+    """
+    Cuenta cuántos papers pertenecen a cada venue objetivo.
+    El matching es case-insensitive y usa subcadenas del código, de sus aliases
+    o del venue extraído del DOI (venue_from_doi).
+    Un paper puede contarse en múltiples venues si su venue menciona varios.
+    """
+    counts: dict[str, int] = {v: 0 for v in venues}
+    for p in papers or []:
         venue = str(p.get("venue") or "").lower()
-        if not venue:
+        venue_from_doi = str(p.get("venue_from_doi") or "").lower()
+        if not venue and not venue_from_doi:
             continue
-        for target in PRISMA_TARGET_VENUES:
-            if target.lower() in venue:
+        for target in venues:
+            if _venue_matches_target(venue, target, aliases.get(target, []), venue_from_doi):
                 counts[target] += 1
     return counts
 
@@ -141,15 +282,24 @@ def _build_prisma_md(output_dir: Path, input_dir: Path,
                      selected_count: int,
                      copied_count: int,
                      not_found_count: int,
-                     selected_papers: list[dict] | None = None,
-                     low_text_papers: list[dict] | None = None,
-                     paper_blacklist_ids: list[str] | None = None,
-                     paper_blacklist_reason: str = "") -> str:
+                     ranked_papers: list[dict] | None = None,
+                     ranking_outside_top_k: list[dict] | None = None,
+                     paper_blacklist: dict[str, dict] | None = None,
+                     target_venues: list[str] | None = None,
+                     venue_aliases: dict[str, list[str]] | None = None) -> str:
     """
     Construye el contenido del archivo prisma.md con todas las estadísticas
     del proceso de selección PRISMA.
     """
     lines: list[str] = []
+
+    # ------------------------------------------------------------------
+    # Cargar venues objetivo desde conceptsQuery.json (si no se pasaron)
+    # ------------------------------------------------------------------
+    if target_venues is None:
+        target_venues, venue_aliases = _load_target_venues(input_dir)
+    elif venue_aliases is None:
+        _, venue_aliases = _load_target_venues(input_dir)
 
     # ------------------------------------------------------------------
     # Cabecera
@@ -550,67 +700,132 @@ def _build_prisma_md(output_dir: Path, input_dir: Path,
     # ------------------------------------------------------------------
     # 6.5. Distribución por venue / conferencia objetivo
     # ------------------------------------------------------------------
-    venue_counts = _count_papers_by_venue(selected_papers)
-    total_target = sum(venue_counts.values())
+    # Se cuenta sobre los papers que SUPERAN el umbral de similitud
+    # (ranked_papers.json = dentro de top_k + ranking_outside_top_k.json
+    # = fuera de top_k pero > umbral), no solo sobre los seleccionados
+    # manualmente por el investigador.
+    ranked_papers = ranked_papers or []
+    ranking_outside_top_k = ranking_outside_top_k or []
 
-    lines.append("## 6.5. Distribución de papers seleccionados por venue / conferencia")
+    # Papers que SUPERAN el umbral (total = top_k + outside_top_k)
+    papers_above_threshold = list(ranked_papers) + list(ranking_outside_top_k)
+
+    venue_counts_threshold = _count_venues_by_papers(papers_above_threshold, target_venues, venue_aliases)
+    venue_counts_top_k = _count_venues_by_papers(ranked_papers, target_venues, venue_aliases)
+    total_target_threshold = sum(venue_counts_threshold.values())
+    total_target_top_k = sum(venue_counts_top_k.values())
+
+    lines.append("## 6.5. Distribución de papers por venue / conferencia objetivo")
     lines.append("")
     lines.append(
-        f"Total de papers cuyo venue coincide con alguna conferencia objetivo: "
-        f"{total_target} de {selected_count} seleccionados."
+        "Conteo sobre papers que SUPERAN el umbral de similitud de coseno "
+        "(umbral aplicado ANTES del top_k). Se distingue entre:"
     )
-    lines.append("")
-    lines.append("| Venue / Conferencia | Papers |")
-    lines.append("|---------------------|--------|")
-    for venue in PRISMA_TARGET_VENUES:
-        lines.append(f"| {venue} | {venue_counts[venue]} |")
-    lines.append("")
-
-    # ------------------------------------------------------------------
-    # 6.6. Papers con bajo contenido de texto (excluidos del corpus útil)
-    # ------------------------------------------------------------------
-    low_text_papers = low_text_papers or []
-    paper_blacklist_ids = paper_blacklist_ids or []
-
-    lines.append("## 6.6. Papers con bajo contenido de texto extraído")
     lines.append("")
     lines.append(
-        "Estos papers tienen su PDF descargado pero, tras la extracción y limpieza "
-        "de texto en `corpusCleaning`, contienen menos de 500 palabras. Esto suele "
-        "indicar PDFs escaneados (sin capa de texto), con columnas de dos columnas "
-        "que el extractor no maneja, o con protección/restricciones. Se recomienda "
-        "revisarlos manualmente o añadirlos a `paper_blacklist` en `config.json`."
+        f"- Papers que superan el umbral (total): {len(papers_above_threshold)} "
+        f"(estos están dentro del top_k o se quedan fuera solo por el cupo)"
+    )
+    lines.append(
+        f"- Papers dentro del top_k (ranked_papers.json): {len(ranked_papers)}"
     )
     lines.append("")
-    lines.append(f"- Total de papers con bajo contenido: {len(low_text_papers)}")
+    lines.append(
+        f"De los {total_target_threshold} papers con venue objetivo entre los que "
+        f"superan el umbral, {total_target_top_k} están dentro del top_k."
+    )
     lines.append("")
-
-    if low_text_papers:
-        lines.append("### 6.6.1. Lista de papers con bajo contenido")
-        lines.append("")
-        lines.append("| Paper ID | Palabras | Caracteres | Título |")
-        lines.append("|----------|----------|------------|--------|")
-        for p in low_text_papers[:50]:
-            pid = p.get("paper_id", "?")
-            wc = p.get("word_count", 0)
-            cc = p.get("char_count", 0)
-            title = (p.get("title", "") or "SIN TÍTULO")[:60]
-            lines.append(f"| {pid} | {wc} | {cc} | {title} |")
-        if len(low_text_papers) > 50:
-            lines.append(f"| ... | ... | ... | (y {len(low_text_papers) - 50} más) |")
-        lines.append("")
-
-    if paper_blacklist_ids:
-        lines.append("### 6.6.2. Blacklist de papers excluidos del ranking")
-        lines.append("")
+    lines.append("| Venue / Conferencia | Papers > umbral | Papers en top_k |")
+    lines.append("|---------------------|-----------------|-----------------|")
+    for venue in target_venues:
         lines.append(
-            f"Motivo: {paper_blacklist_reason or 'bajo contenido de texto detectado en corpusCleaning'}"
+            f"| {venue} | {venue_counts_threshold.get(venue, 0)} | {venue_counts_top_k.get(venue, 0)} |"
         )
+    lines.append("")
+
+    # ------------------------------------------------------------------
+    # 6.6. Papers excluidos del ranking por paper_blacklist
+    # ------------------------------------------------------------------
+    paper_blacklist = paper_blacklist or {}
+
+    # Mapeo de motivos a indicadores numéricos
+    REASON_TO_INDICATOR = {
+        "low_text": "1",
+        "operator_rejected": "2",
+    }
+
+    def _get_indicator(reason: str) -> str:
+        return REASON_TO_INDICATOR.get(reason, "?")
+
+    def _indicator_legend() -> str:
+        return (
+            "1: Bajo contenido de texto extraído (menos de 500 palabras tras "
+            "limpieza en corpusCleaning)\n"
+            "2: Excluido de selección manual (operador indicó 'N' durante la "
+            "revisión de papers)"
+        )
+
+    # Construir lookup de títulos desde canonical.json si es posible
+    title_lookup: dict[str, str] = {}
+    canonical_file = output_dir / "canonical.json"
+    if canonical_file.exists():
+        try:
+            with open(canonical_file, "r", encoding="utf-8") as f:
+                canonical = json.load(f)
+            if isinstance(canonical, list):
+                for p in canonical:
+                    pid = p.get("paper_id")
+                    title = p.get("title")
+                    if pid and title:
+                        title_lookup[pid] = title
+        except Exception:
+            pass
+
+    lines.append("## 6.6. Papers excluidos del ranking por paper_blacklist")
+    lines.append("")
+    lines.append(
+        "Estos papers se excluyen automáticamente antes del ranking para no ocupar "
+        "cupo de `top_k`. Cada uno tiene un indicador numérico que corresponde a "
+        "el motivo de exclusión (ver leyenda al final de esta sección)."
+    )
+    lines.append("")
+    lines.append(f"- Total de papers en blacklist: {len(paper_blacklist)}")
+    lines.append("")
+
+    if paper_blacklist:
+        # Resumen por indicador
+        indicator_counts: dict[str, int] = {}
+        for pid, info in paper_blacklist.items():
+            ind = _get_indicator(info.get("reason", "unknown"))
+            indicator_counts[ind] = indicator_counts.get(ind, 0) + 1
+
+        lines.append("### 6.6.1. Resumen por indicador")
         lines.append("")
-        lines.append("| Paper ID |")
-        lines.append("|----------|")
-        for pid in sorted(paper_blacklist_ids):
-            lines.append(f"| {pid} |")
+        lines.append("| Indicador | Motivo | Nº papers |")
+        lines.append("|-----------|--------|-----------|")
+        for ind in sorted(indicator_counts.keys()):
+            motivo = (
+                "Bajo contenido de texto" if ind == "1"
+                else "Excluido de selección manual" if ind == "2"
+                else "Otro"
+            )
+            lines.append(f"| {ind} | {motivo} | {indicator_counts[ind]} |")
+        lines.append("")
+
+        lines.append("### 6.6.2. Lista detallada de papers blacklisteados")
+        lines.append("")
+        lines.append("| Paper ID | Título | Indicador |")
+        lines.append("|----------|--------|-----------|")
+        for pid in sorted(paper_blacklist.keys()):
+            info = paper_blacklist[pid]
+            title = title_lookup.get(pid) or info.get("detail", "")[:60] or "SIN TÍTULO"
+            ind = _get_indicator(info.get("reason", "unknown"))
+            lines.append(f"| {pid} | {title} | {ind} |")
+        lines.append("")
+        lines.append("### Leyenda de indicadores")
+        lines.append("")
+        for line in _indicator_legend().split("\n"):
+            lines.append(f"- {line}")
         lines.append("")
         lines.append(
             "Nota: estos papers se excluyen automáticamente antes del ranking en "
@@ -694,17 +909,16 @@ def processCompleteSelection() -> Optional[Path]:
     search_cfg = search_config.get("search", {}) if isinstance(search_config, dict) else {}
     availables = search_cfg.get("availables", [])
 
-    # --- LEER LOW_TEXT_PAPERS (generado por corpusCleaning) ---
-    low_text_papers_file = output_dir / "low_text_papers.json"
-    low_text_papers = _load_json(low_text_papers_file)
-    if not isinstance(low_text_papers, list):
-        low_text_papers = []
-
-    # --- LEER PAPER_BLACKLIST de config.json ---
-    defaults = getattr(processControl, "defaults", None) or {}
-    paper_bl_cfg = defaults.get("paper_blacklist", {}) if isinstance(defaults, dict) else {}
-    paper_blacklist_ids = list(paper_bl_cfg.get("ids", []) or [])
-    paper_blacklist_reason = paper_bl_cfg.get("reason", "")
+    # --- LEER PAPER_BLACKLIST CONSOLIDADA ---
+    # Combina: config.json entries + rechazos del operador + bajo contenido de texto.
+    paper_blacklist = _load_paper_blacklist(output_dir)
+    if paper_blacklist:
+        writeLog("info", logger,
+                 f"[CompleteSelection] {len(paper_blacklist)} papers en paper_blacklist "
+                 f"(config + rechazos operador + bajo contenido de texto)")
+    else:
+        writeLog("info", logger,
+                 f"[CompleteSelection] Ningún paper en paper_blacklist")
 
     # ------------------------------------------------------------------
     # 1. Copiar PDFs (funcionalidad original de copySelectedPapers)
@@ -756,23 +970,34 @@ def processCompleteSelection() -> Optional[Path]:
     # ------------------------------------------------------------------
     # 2. Generar prisma.md
     # ------------------------------------------------------------------
+    # Cargar papers que superan el umbral (dentro de top_k)
+    ranked_papers_file = output_dir / "ranked_papers.json"
+    ranked_papers = _load_json(ranked_papers_file)
+    if not isinstance(ranked_papers, list):
+        ranked_papers = []
+
+    # Cargar papers que superan el umbral pero se quedan fuera por top_k
+    outside_top_k_file = output_dir / "ranking_outside_top_k.json"
+    ranking_outside_top_k = _load_json(outside_top_k_file)
+    if not isinstance(ranking_outside_top_k, list):
+        ranking_outside_top_k = []
+
+    # Cargar venues objetivo desde conceptsQuery.json del subject
+    target_venues, venue_aliases = _load_target_venues(input_dir)
+
     prisma_md = _build_prisma_md(
         output_dir=output_dir,
-        input_dir=Path(
-            getattr(processControl, "env", {}).get(
-                "input",
-                os.path.join(processControl.env.get("results_root", "results"), "input"),
-            )
-        ),
+        input_dir=input_dir,
         search_config=search_config,
         availables=availables,
         selected_count=len(paper_ids),
         copied_count=len(copied),
         not_found_count=len(not_found),
-        selected_papers=selected,
-        low_text_papers=low_text_papers,
-        paper_blacklist_ids=paper_blacklist_ids,
-        paper_blacklist_reason=paper_blacklist_reason,
+        ranked_papers=ranked_papers,
+        ranking_outside_top_k=ranking_outside_top_k,
+        paper_blacklist=paper_blacklist,
+        target_venues=target_venues,
+        venue_aliases=venue_aliases,
     )
 
     prisma_path = output_dir / "prisma.md"

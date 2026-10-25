@@ -130,30 +130,190 @@ def extract_pubmed_id(record_text: str, field: str) -> str:
 #   PM -> pmid (when present, some WoS records carry a PubMed ID)
 # --------------------------------------------------------
 
+def _detect_wos_format(filepath: str) -> str:
+    """
+    Detecta si un archivo WoS está en formato TSV (tab-separated values con
+    encabezado) o Tagged Field Format (tags tipo PT, AU, TI al inicio de línea).
+
+    Retorna "tsv" o "tagged".
+    """
+    with open(filepath, "r", encoding="utf-8-sig", errors="ignore") as f:
+        first_line = f.readline()
+
+    if not first_line:
+        return "tagged"
+
+    # Si la primera línea tiene muchos campos separados por tabulador y
+    # el primer campo es una etiqueta conocida de WoS (PT, AU, TI, etc.),
+    # es TSV. Si empieza con "FN " o "VR " o "PT " seguido de espacio y
+    # valor, es Tagged Field.
+    fields = first_line.rstrip("\n\r").split("\t")
+    if len(fields) >= 5:
+        first_field = fields[0].strip().upper()
+        if first_field in ("PT", "AU", "TI", "SO", "DI", "PY", "AB", "TC", "NR", "UT", "PM"):
+            return "tsv"
+        if first_field in ("FN", "VR"):
+            return "tagged"
+
+    # Si la primera línea empieza con "FN " o "VR ", es Tagged Field
+    stripped = first_line.strip()
+    if stripped.startswith("FN ") or stripped.startswith("VR "):
+        return "tagged"
+
+    return "tagged"
+
+
+def _parse_wos_tsv(filepath: str, source_name: str, start_index: int) -> list[dict]:
+    """
+    Parsea un archivo WoS en formato TSV (tab-separated values con encabezado).
+
+    Columnas WoS mapeadas a campos internos:
+        PT → document_type, AU → authors, TI → title, SO → venue,
+        AB → abstract, DI → doi, PY → year, TC → citation_count,
+        NR → references_count, DE → author keywords, ID → keyw plus,
+        UT → accession_number, PM → pmid, DT → document_type
+    """
+    import csv
+
+    papers: list[dict] = []
+    idx = start_index
+    skipped_count = 0
+
+    # Mapeo de columna WoS → campo interno (solo las que usamos)
+    WOSEN_COLUMNS = {
+        "PT": "document_type",
+        "AU": "authors",
+        "TI": "title",
+        "SO": "venue",
+        "AB": "abstract",
+        "DI": "doi",
+        "PY": "year",
+        "TC": "citation_count",
+        "NR": "references_count",
+        "DE": "author_keywords",
+        "ID": "keyw_plus",
+        "UT": "accession_number",
+        "PM": "pmid",
+        "LA": "language",
+        "DT": "document_type_alt",
+        "VL": "volume",
+        "IS": "issue",
+        "BP": "start_page",
+        "EP": "end_page",
+        "AR": "article_number",
+        "SN": "issn",
+        "EI": "e_issn",
+        "BN": "isbn",
+    }
+
+    with open(filepath, "r", encoding="utf-8-sig", errors="ignore", newline="") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            # Limpiar claves del encabezado (BOM, espacios)
+            row = { (k or "").strip(): (v or "") for k, v in row.items() }
+
+            title = normalized_title(row.get("TI", ""))
+            abstract = normalize_text(row.get("AB", ""))
+            doi = normalize_doi(row.get("DI", ""))
+
+            # Los autores en WoS TSV vienen separados por ";"
+            authors_raw = row.get("AU", "")
+            authors = [a.strip() for a in authors_raw.split(";") if a.strip()]
+
+            # Keywords: DE (author keywords) y ID (KeyWords Plus)
+            keywords = []
+            de_raw = row.get("DE", "")
+            if de_raw:
+                keywords.extend([k.strip() for k in de_raw.split(";") if k.strip()])
+            id_raw = row.get("ID", "")
+            if id_raw:
+                keywords.extend([k.strip() for k in id_raw.split(";") if k.strip()])
+            keywords = sorted(set(keywords))
+
+            try:
+                year = int(row.get("PY", "").strip())
+            except (ValueError, TypeError):
+                year = None
+
+            venue = normalize_text(row.get("SO", ""))
+            document_type = normalize_text(row.get("DT", "") or row.get("PT", ""))
+            language = normalize_text(row.get("LA", ""))
+
+            references_count = safe_int(row.get("NR", ""))
+            citation_count = safe_int(row.get("TC", ""))
+
+            accession_number = row.get("UT", "").strip()
+            pmid = row.get("PM", "").strip()
+
+            # Validación de calidad
+            if not title or len(title) < 5:
+                skipped_count += 1
+                idx += 1
+                continue
+
+            landing_page = None
+            if doi:
+                landing_page = f"https://doi.org/{doi}"
+            elif accession_number:
+                landing_page = f"https://www.webofscience.com/wos/woscc/full-record/{accession_number}"
+
+            paper = {
+                "paper_id": build_source_paper_id(source_name, idx),
+                "source": source_name,
+                "source_index": idx,
+                "original_id": f"doi:{doi.lower().strip()}" if doi else f"title:{sha1(title)}",
+                "doi": doi,
+                "title": title,
+                "abstract": abstract,
+                "authors": authors,
+                "keywords": keywords,
+                "year": year,
+                "venue": venue,
+                "document_type": document_type,
+                "language": language,
+                "references_count": references_count,
+                "citation_count": citation_count,
+                "relevance_score": None,
+                "selected": False,
+                "has_full_text": False,
+                "raw_source_file": os.path.basename(filepath),
+                "pdf_url": None,
+                "landing_page": landing_page,
+                "accession_number": accession_number if accession_number else None,
+                "pmid": pmid if pmid else None,
+            }
+
+            papers.append(paper)
+            idx += 1
+
+    if skipped_count > 0:
+        writeLog("info", logger,
+                 f"[WoS] Skipped {skipped_count} record(s) with missing/short title "
+                 f"in {os.path.basename(filepath)}")
+
+    writeLog("info", logger,
+             f"[WoS] Parsed {len(papers)} record(s) from {os.path.basename(filepath)}")
+
+    return papers
+
+
 def parse_wos_file(filepath, source_name="wos", start_index=1):
     """
-    Parses a WoS export in Tagged Field Format and assigns incremental
-    paper_ids. start_index allows concatenating multiple files for the
-    same source.
+    Parses a WoS export and assigns incremental paper_ids.
+    start_index allows concatenating multiple files for the same source.
 
-    Format reference (matches the sample export):
-        FN Clarivate Analytics Web of Science
-        VR 1.0
-        PT J
-        AU Sajno, Elena
-           Rossi, Alessio
-        TI XAI in Affective Computing: a Preliminary Study
-        SO ANNUAL REVIEW OF CYBERTHERAPY AND TELEMEDICINE
-        AB Affective computing is a rapidly growing field...
-        TC 1
-        PY 2023
-        UT WOS:001115856700009
-        ER
+    Soporta dos formatos:
+      1. TSV (tab-separated values con encabezado) — detección automática
+      2. Tagged Field Format (tags PT/AU/TI al inicio de línea, terminó con ER)
 
-        PT J
-        AU ...
-        ER
+    El formato se detecta automáticamente inspeccionando la primera línea.
     """
+    fmt = _detect_wos_format(filepath)
+
+    if fmt == "tsv":
+        return _parse_wos_tsv(filepath, source_name, start_index)
+
+    # --- Tagged Field Format (código original) ---
     papers = []
     idx = start_index
     skipped_count = 0
