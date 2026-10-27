@@ -13,6 +13,18 @@ from pathlib import Path
 from json import JSONDecodeError
 
 
+def is_auto_mode() -> bool:
+    """
+    @Desc: Indica si el pipeline se ejecuta en modo automático (sin prompts).
+    @Usage: Solo se activa de forma explícita con `--serverGPU serverFull`.
+            En ese modo los puntos interactivos (selección de papers y
+            recuperación manual de PDFs) se resuelven con valores por defecto
+            para poder ejecutar los pasos 1-21 de forma desatendida.
+    """
+    args = getattr(processControl, "args", None)
+    return getattr(args, "serverGPU", None) == "serverFull"
+
+
 def huggingface_login():
     try:
         # Add your Hugging Face token here, or retrieve it from environment variables

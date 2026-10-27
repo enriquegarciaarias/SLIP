@@ -170,6 +170,11 @@ Cada subject tiene su propio `results/input/{subject}/config.json` que hace **me
 2. **Ingestión manual** (`manualIngestion`): PDFs semilla en `manual_papers/` se integran en `selected_papers.json`.
 3. **Descarga de PDFs** (`adquisitionEngine`): si falla una descarga, interfaz de recuperación manual. El usuario deja el PDF en `results/output/{subject}/pdfs/manual/`. Los PDFs se archivan en `_pdf_vault/`.
 
+   **Modo desatendido (`--serverGPU serverFull`):** los puntos 1 y 3 se resuelven sin
+   preguntar (selección de todos los papers e ingesta omitida de PDFs no descargables).
+   Los papers de `manual_papers/` siguen entrando vía `manualPapersScanner` +
+   `manualIngestion`. Pensado para reconstruir el pipeline completo en el servidor.
+
 ---
 
 ## 7. Iconos en writeLog para logs sin color
@@ -212,7 +217,28 @@ python main.py --subject sensores --proc SLIP --serverGPU start
 python main.py --subject sensores --proc SLIP --serverGPU server
 ```
 
-Si `--serverGPU` no se indica, se ejecuta el pipeline completo en local (comportamiento habitual).
+### Ejecución completa desatendida en servidor (`serverFull`)
+
+Si se quiere reconstruir **todo** el pipeline en el servidor (incluyendo la ingesta de
+`manual_papers/` y los pasos 1-7) sin intervención humana:
+
+```bash
+python main.py --subject sensores --proc SLIP --serverGPU serverFull
+```
+
+En este modo los dos puntos interactivos se resuelven automáticamente:
+
+| Punto interactivo | Comportamiento en `serverFull` |
+|---|---|
+| Selección de papers (`enrichmentEngine`) | Equivale a responder `F` en el primer paper: **se seleccionan todos los papers del ranking**. Se ignora `selection_checkpoint.json` (reconstrucción determinista); los rechazos históricos siguen aplicándose vía `rejected_papers.json` / `paper_blacklist`. |
+| Recuperación manual de PDF (`adquisitionEngine`) | Equivale a responder `N` en cada paper: los PDFs que no se descargan automáticamente ni están en `_pdf_vault/` quedan como `missing` (sin espera de 60 s ni prompt). `corpusCleaning` los descarta limpiamente. |
+
+Los papers de `manual_papers/` entran igual que en una ejecución local, porque
+`serverFull` ejecuta también `manualPapersScanner` y `manualIngestion`. Para no perder
+PDFs, hay que subir al servidor `results/` completo, incluidos `_pdf_vault/` y
+`manual_papers/`.
+
+Si `--serverGPU` no se indica, se ejecuta el pipeline completo en local (interactivo).
 
 Flags:
 - `--subject`: carpeta en `results/input/` (default `sensores`).
@@ -221,6 +247,10 @@ Flags:
 - `--emergente 0`: no desarrolla conceptos emergentes en `training_materials.md`.
 - `--serverGPU start`: ejecuta solo la parte interactiva local (pasos 1-7) y se detiene.
 - `--serverGPU server`: ejecuta solo la parte no interactiva en servidor GPU (pasos 8-21).
+- `--serverGPU serverFull`: ejecuta el pipeline completo (pasos 1-21) en el servidor sin
+  prompts (selección automática de todos los papers y sin recuperación manual de PDFs).
+  Es la opción indicada para reconstruir el corpus entero en el servidor, incluidos los
+  papers nuevos de `manual_papers/`.
 - `--step <nombre>`: inicia el pipeline directamente desde el paso indicado y continúa hasta el final.
   Ejemplos: `--step TechnicalAnnex`, `--step DiscoveryEngine`, `--step StructureExtraction`.
   Si no se indica, se ejecuta normalmente (o según `--serverGPU`).
@@ -260,15 +290,16 @@ Tests:
 ```bash
 python -m unittest discover -s tests -t .
 ```
-Cubren normalización de DOI, `pdfIndex`, filtro de referencias, cita a nivel de afirmación, dedup de conceptos, OpenAlex, anexo técnico, genericidad/consenso.
+Cubren normalización de DOI, `pdfIndex`, filtro de referencias, cita a nivel de afirmación, dedup de conceptos, OpenAlex, anexo técnico, genericidad/consenso y modo desatendido `serverFull` (`tests/test_server_full_mode.py`).
 
 ---
 
-## 8. Estado actual (SESSION_STATE.md, 2026-10-23)
+## 8. Estado actual (SESSION_STATE.md, 2026-10-27)
 
-Última ejecución: **completada exitosamente** hasta `completeSelection` (`prisma.md` generado con venues objetivo mejoradas).
+Última ejecución: **completada exitosamente** hasta `completeSelection` (`prisma.md` generado con venues objetivo mejoradas). Pasos 7-21 pendientes de ejecutar en servidor.
 
 Mejoras implementadas (históricas + esta sesión):
+- **Modo desatendido `--serverGPU serverFull`**: ejecuta el pipeline completo (pasos 1-21) en el servidor sin prompts. Selecciona todos los papers (equivale a `F`, ignora `selection_checkpoint.json`) y omite la recuperación manual de PDFs (equivale a `N`: los no descargables quedan `missing`). Incluye `manualPapersScanner` + `manualIngestion`, por lo que los papers nuevos de `manual_papers/` entran en la reconstrucción. Detectado por `is_auto_mode()` en `sources/common/utils.py`.
 - Section-weighted embeddings en `discoveryEngine` (+6 topics, +4 docs).
 - Config unificada con `section_weights.presets` y `section_aliases`.
 - `structureExtraction` (71 papers, campos LLM: contribuciones, metodología, resultados, métricas, limitaciones, future_work…).

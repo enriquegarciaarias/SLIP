@@ -31,12 +31,15 @@ def manageArgs():
     parser.add_argument('--emergente', type=int, choices=[0, 1], default=None,
                         help="0 = no desarrolla los conceptos emergentes en training_materials "
                              "(se mantienen los conteos). 1 = se desarrollan (por defecto).")
-    parser.add_argument('--serverGPU', type=str, choices=['start', 'server'], default=None,
+    parser.add_argument('--serverGPU', type=str, choices=['start', 'server', 'serverFull'], default=None,
                         help="Ejecución dividida GPU-server. 'start': ejecutar solo la parte "
                              "interactiva local (pasos 1-7: normalización hasta limpieza de corpus). "
                              "'server': ejecutar solo la parte no interactiva en servidor GPU "
                              "(pasos 8-21: zoning hasta exportación Gemini Notebook). "
-                             "Si no se indica, se ejecuta el pipeline completo en local.")
+                             "'serverFull': ejecutar el pipeline completo (pasos 1-21) en el "
+                             "servidor sin prompts: selecciona todos los papers y omite la "
+                             "recuperación manual de PDFs. Si no se indica, se ejecuta el "
+                             "pipeline completo en local de forma interactiva.")
     parser.add_argument('--step', type=str, default=None,
                         help="Nombre del paso desde el cual iniciar el pipeline (ej. TechnicalAnnex, "
                              "DiscoveryEngine, StructureExtraction). Si se indica, se salta directamente "

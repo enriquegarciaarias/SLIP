@@ -105,8 +105,15 @@ def mainProcess():
     # PARTE LOCAL INTERACTIVA (pasos 1-7): se ejecuta en local y requiere
     # intervención del investigador (selección de papers, resolución de
     # descargas de PDF, etc.).
+    # En modo "serverFull" también se ejecuta aquí, pero los módulos
+    # interactivos detectan el modo automático y no preguntan nada.
     # ------------------------------------------------------------------
-    if server_gpu in (None, "start"):
+    if server_gpu == "serverFull":
+        writeLog("info", logger,
+                 "🤖 [serverGPU:serverFull] Pipeline completo (pasos 1-21) sin prompts: "
+                 "selección automática de todos los papers y sin recuperación manual de PDFs.")
+
+    if server_gpu in (None, "start", "serverFull"):
         from sources.normalizeSearchResults import processNormalizeSearchResults
         processNormalizeSearchResults()
 
@@ -146,7 +153,7 @@ def mainProcess():
     # ------------------------------------------------------------------
     # PARTE SERVIDOR GPU (pasos 8-21): no interactiva
     # ------------------------------------------------------------------
-    if server_gpu in (None, "server"):
+    if server_gpu in (None, "server", "serverFull"):
         from sources.argumentativeZoning import processArgumentativeZoning
         processArgumentativeZoning()
 

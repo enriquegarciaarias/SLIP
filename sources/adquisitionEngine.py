@@ -2,7 +2,7 @@
 from sources.common.common import logger, processControl, writeLog
 from sources.common.pdf_resolver import resolve_and_download
 from sources.common.pdfIndex import register_pdf, write_pdf_log
-from sources.common.utils import inicioModulo, load_blacklist, load_url_blacklist, is_url_blacklisted
+from sources.common.utils import inicioModulo, load_blacklist, load_url_blacklist, is_url_blacklisted, is_auto_mode
 
 import json
 import re
@@ -204,6 +204,7 @@ def archive_to_vault(target_file: Path, global_id: str, vault_dir: Path, invento
 
 
 def pdf_acquisition_engine(selected_papers, output_dir):
+    auto_mode = is_auto_mode()
     pdf_dir = output_dir / "pdfs"
     pdf_dir.mkdir(parents=True, exist_ok=True)
     vault_dir = output_dir / "_pdf_vault"
@@ -296,6 +297,17 @@ def pdf_acquisition_engine(selected_papers, output_dir):
             # -------------------------------------------------------------
             # 3. INTERVENCIÓN HUMANA
             # -------------------------------------------------------------
+            if auto_mode:
+                # Modo automático (--serverGPU serverFull): no se espera
+                # intervención humana ni 60s de escaneo de pdfs/manual/.
+                writeLog("warning", logger,
+                         f"  ⏭️ Modo automático: se omite la recuperación manual de {paper_id}.")
+                out_paper["acquisition_status"] = "missing"
+                out_paper["local_pdf_path"] = None
+                missing.append({"paper_id": paper_id, "title": paper.get("title")})
+                output_papers.append(out_paper)
+                continue
+
             writeLog("warning", logger, f"  ❌ Automatización fallida. Iniciando recuperación manual...")
             recovered, file_path = manual_pdf_intervention(paper, pdf_dir, idx, len(selected_papers))
 

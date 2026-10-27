@@ -1,7 +1,7 @@
 # enrichmentEngine.py
 from sources.common.common import logger, writeLog, processControl
 from sources.common.pdf_resolver import resolve_pdf_url
-from sources.common.utils import inicioModulo, read_json
+from sources.common.utils import inicioModulo, read_json, is_auto_mode
 
 import json
 import time
@@ -350,7 +350,7 @@ def refresh_selection_from_review(selected: list, rejected: list, review: list):
     return selected, rejected, stale_sel + stale_rej
 
 
-def interactive_selection(review: list, output_dir: Path) -> tuple[list, list]:
+def interactive_selection(review: list, output_dir: Path, auto: bool | None = None) -> tuple[list, list]:
     """
     Selección interactiva de papers.
 
@@ -360,15 +360,49 @@ def interactive_selection(review: list, output_dir: Path) -> tuple[list, list]:
         S = Guardar progreso y salir (reanudar después)
         F = Finalizar (todos los restantes se marcan como seleccionados)
 
+    En modo automático (`auto=True`, activado por --serverGPU serverFull) no se
+    pregunta nada: se seleccionan todos los papers del ranking y se ignora el
+    checkpoint previo, para garantizar una reconstrucción completa y determinista.
+
     El checkpoint solo se reutiliza si las condiciones de entrada son idénticas
     (mismo conjunto de paper_ids en el ranking). Si el ranking cambió, se
     descarta el checkpoint y se empieza desde cero.
     """
+    if auto is None:
+        auto = is_auto_mode()
+
     checkpoint_path = output_dir / "selection_checkpoint.json"
+    current_fingerprint = _ranking_fingerprint(review)
+
+    # ------------------------------------------------------------------
+    # MODO AUTOMÁTICO (equivalente a responder "F" en el primer paper)
+    # ------------------------------------------------------------------
+    if auto:
+        writeLog("info", logger,
+                 "[Selection] Modo automático (--serverGPU serverFull): se seleccionan "
+                 "todos los papers y se ignora cualquier checkpoint previo.")
+
+        selected = []
+        for p in review:
+            p["selected"] = True
+            selected.append(p)
+
+        state = {
+            "last_index": len(review),
+            "selected": selected,
+            "rejected": [],
+            "timestamp": None,
+            "input_fingerprint": current_fingerprint,
+        }
+        save_checkpoint(checkpoint_path, state)
+
+        writeLog("info", logger,
+                 f"[Selection] {len(selected)} papers seleccionados automáticamente.")
+        return selected, []
+
     state = load_checkpoint(checkpoint_path)
 
     # Verificar que las condiciones de entrada sean idénticas
-    current_fingerprint = _ranking_fingerprint(review)
     stored_fingerprint = state.get("input_fingerprint")
 
     if stored_fingerprint is None or stored_fingerprint != current_fingerprint:
@@ -460,12 +494,21 @@ def save_selected(selected: list, output_dir: Path) -> Path:
     return file
 
 
-def save_rejected_papers(rejected: list, output_dir: Path) -> Path:
+def save_rejected_papers(rejected: list, output_dir: Path, preserve_empty: bool = False) -> Path:
     """
     Guarda los papers rechazados por el operador con motivo 'operator_rejected'
     para que puedan añadirse a la paper_blacklist en futuras ejecuciones.
+
+    Si `preserve_empty` es True (modo automático) y no hay rechazos, no se
+    sobrescribe el fichero existente: se conservan los rechazos históricos que
+    alimentan la paper_blacklist.
     """
     file = output_dir / "rejected_papers.json"
+    if preserve_empty and not rejected and file.exists():
+        writeLog("info", logger,
+                 "[Enrichment] Modo automático sin rechazos: se preserva "
+                 "rejected_papers.json existente.")
+        return file
     rejected_entries = []
     for p in rejected:
         gid = p.get("global_id")
@@ -532,7 +575,8 @@ def processEnrichmentEngine():
         selected_file = save_selected(selected, output_dir)
 
         # 6. Guardar rejected_papers.json (para paper_blacklist en futuras ejecuciones)
-        rejected_file = save_rejected_papers(rejected, output_dir)
+        rejected_file = save_rejected_papers(rejected, output_dir,
+                                             preserve_empty=is_auto_mode())
 
         writeLog("info", logger, f"[Enrichment] Selected: {len(selected)} papers")
         writeLog("info", logger, f"[Enrichment] Rejected: {len(rejected)} papers")

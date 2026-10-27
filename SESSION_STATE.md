@@ -955,3 +955,103 @@ Para desactivar completamente: `"emergente": 0`.
 **Estado del pipeline:** Sin cambios funcionales en el orden de ejecución ni en los módulos. Los pasos 1-6 de SensoresACL siguen completados hasta `completeSelection`. Los pasos 7-21 permanecen pendientes.
 
 **Si cambiaste estructura, módulos, config o flujos:** `AGENTS.md` y `SESSION_STATE.md` actualizados.
+
+---
+
+### Sesión cerrada — 2026-10-27
+
+**Qué se hizo:** nuevo modo `--serverGPU serverFull` para ejecutar el pipeline completo
+(pasos 1-21) en el servidor de forma desatendida, incluyendo la ingesta de
+`manual_papers/` y la reconstrucción total del corpus.
+
+Decisiones acordadas con el operador:
+1. **Selección de papers**: se seleccionan **todos** los papers del ranking (equivalente a
+   responder `F` en el primer paper) y se **ignora `selection_checkpoint.json`** para que la
+   reconstrucción sea determinista. Los rechazos históricos no se pierden: siguen
+   aplicándose vía `rejected_papers.json` / `paper_blacklist`.
+2. **Modo automático solo con `--serverGPU serverFull`** (no se activa por ausencia de TTY,
+   para no romper la ejecución interactiva desde PyCharm).
+3. **`rejected_papers.json` se preserva** si en modo automático la lista de rechazos está
+   vacía (no se sobrescribe con `[]`).
+
+Implementación:
+- `sources/common/utils.py`: nueva función `is_auto_mode()` (True solo si
+  `processControl.args.serverGPU == "serverFull"`).
+- `sources/common/paramsManager.py`: `--serverGPU` acepta `start`, `server` y `serverFull`
+  con ayuda actualizada.
+- `sources/enrichmentEngine.py`: `interactive_selection(..., auto=None)` con rama
+  automática (sin `input()`, sin imprimir abstracts, checkpoint con fingerprint actualizado);
+  `save_rejected_papers(..., preserve_empty=False)` no sobrescribe el histórico vacío en
+  modo automático.
+- `sources/adquisitionEngine.py`: en modo automático, si falla la descarga se marca
+  `acquisition_status="missing"` y se continúa **sin esperar 60 s ni abrir la recuperación
+  manual**. `corpusCleaning` ya descarta esos papers limpiamente.
+- `main.py`: `serverFull` ejecuta el bloque local (1-7) y el bloque servidor (8-21) sin
+  detenerse; log de arranque indicando el modo.
+- `tests/test_server_full_mode.py`: 13 tests nuevos: detección de modo, selección automática
+  sin `input`, ignorar checkpoint, review vacío, preservación de `rejected_papers.json`,
+  integración de `mainProcess` (23 pasos con `serverFull`, 9 con `start`) y validación del
+  argumento `--serverGPU`.
+
+**Qué salió bien:**
+1. **Modo `serverFull` funcional y compatible:** `start` y `server` mantienen su
+   comportamiento exacto; `--step` sigue teniendo prioridad; no se tocó `config.json` ni el
+   orden de módulos.
+2. **Decisiones del operador implementadas:** selección total ignorando checkpoint,
+   activación solo por flag explícita y preservación de `rejected_papers.json`.
+3. **Sin esperas ocultas:** se evitó el escenario de 40 fallos × 60 s de espera que habría
+   supuesto "simular" la respuesta `N` en `manual_pdf_intervention`.
+4. **Cobertura de tests:** 13/13 tests nuevos OK. Suite completa: **104 tests, 102 OK**,
+   con solo los 2 fallos preexistentes de `test_acm_arxiv`.
+5. **Documentación sincronizada:** `AGENTS.md` describe el nuevo modo, sus respuestas
+   automáticas y el requisito de subir `_pdf_vault/` y `manual_papers/`.
+
+**Qué falló:**
+1. **Primer test de integración mal enfocado:** se intentó parchear `main.import_module`,
+   pero `mainProcess()` usa importaciones explícitas (`from sources.x import processY`), por
+   lo que se ejecutaban los módulos reales y fallaba con
+   `'controlProcess' object has no attribute 'env'`. Se corrigió inyectando módulos falsos
+   en `sys.modules` a partir de `_STEP_REGISTRY`.
+2. **2 fallos preexistentes** en `tests/test_acm_arxiv.py`
+   (`test_parses_and_flags_truncation`, `test_recover_arxiv_doi_mapping`). Verificado en un
+   worktree limpio sobre `HEAD`: ya fallaban antes de esta sesión.
+3. **No se ejecutó el pipeline real** con `serverFull`; la validación fue unitaria, con los
+   módulos simulados. Queda pendiente la prueba end-to-end en el servidor.
+
+**Notas operativas:**
+- En `serverFull`, cada PDF que no se descargue ni esté en `_pdf_vault/` queda como
+  `missing` y fuera del corpus. Es imprescindible subir al servidor `results/` completo,
+  incluidos `_pdf_vault/` y `manual_papers/`.
+- `serverFull` re-ejecuta la ingesta completa: `normalizeSearchResults` elimina los
+  `*_search.json` legacy y relanza las APIs configuradas, así que el tiempo de ejecución es
+  el del pipeline completo.
+- `--serverGPU serverFull` junto con `--step`: `--step` tiene prioridad sobre el punto de
+  arranque, pero `is_auto_mode()` sigue devolviendo True (el flag está presente), así que
+  los módulos interactivos que se ejecuten desde ese paso tampoco preguntarán. Útil para
+  reanudar una ejecución desatendida.
+
+**Próximos pasos:**
+1. Ejecutar `python main.py --subject SensoresACL --proc SLIP --serverGPU serverFull` en el
+   servidor y verificar el conteo de `selected_papers.json`, `selected_acquired.json` y
+   `missing_pdfs.json`.
+2. Comprobar que los papers nuevos de `manual_papers/` aparecen en `papers_text.json` y en
+   `prisma.md`.
+3. Verificar que `venue_from_doi` se conserva tras `corpusCleaning`.
+4. Revisar los 2 tests de `test_acm_arxiv.py` (deuda preexistente).
+5. Hacer commit y push de los cambios de esta sesión (no se hizo).
+
+**Cambios en estructura de directorios, módulos, configuración o flujos:**
+- **Sin cambios** en la estructura de directorios ni en el orden de pasos del pipeline.
+- **Configuración de ejecución:** nuevo valor `serverFull` para `--serverGPU` (no afecta a
+  `config.json` ni a los configs por subject).
+- **Flujo:** `serverFull` ejecuta los pasos 1-21 en una sola pasada sin prompts; los dos
+  puntos interactivos se resuelven de forma determinista.
+- **Archivos modificados:** `sources/common/utils.py`, `sources/common/paramsManager.py`,
+  `sources/enrichmentEngine.py`, `sources/adquisitionEngine.py`, `main.py`.
+- **Archivo nuevo:** `tests/test_server_full_mode.py`.
+- **Documentación:** `AGENTS.md` (sección de ejecución `serverFull`, flags e interacción
+  manual) y `SESSION_STATE.md` (esta entrada).
+
+**Estado del pipeline:** pasos 1-6 de SensoresACL siguen completados hasta `completeSelection`;
+los pasos 7-21 siguen pendientes. El nuevo modo `serverFull` permite ejecutarlos todos en el
+servidor, incluida la reconstrucción desde la ingesta.
