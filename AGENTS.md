@@ -226,6 +226,14 @@ Si se quiere reconstruir **todo** el pipeline en el servidor (incluyendo la inge
 python main.py --subject sensores --proc SLIP --serverGPU serverFull
 ```
 
+**Cambio importante en `serverFull`:** el paso 1 (`normalizeSearchResults`) se salta
+intencionadamente para no volver a consultar las APIs de las BBDD (IEEE, PubMed, etc.)
+ni regenerar los archivos `*_search.json`. Se asume que los índices ya existen de una
+ejecución previa (`canonical.json`, `*_search.json`, `ranked_papers.json`). Solo se
+incorporan los PDFs manuales nuevos (pasos 5 y 6: `manualPapersScanner` +
+`manualIngestion`) y se continúa el pipeline desde el ranking en adelante. Esto evita
+reconstruir índices innecesariamente cuando lo único que varía son los PDFs manuales.
+
 En este modo los dos puntos interactivos se resuelven automáticamente:
 
 | Punto interactivo | Comportamiento en `serverFull` |

@@ -114,8 +114,20 @@ def mainProcess():
                  "selección automática de todos los papers y sin recuperación manual de PDFs.")
 
     if server_gpu in (None, "start", "serverFull"):
-        from sources.normalizeSearchResults import processNormalizeSearchResults
-        processNormalizeSearchResults()
+        # En modo serverFull se saltan los pasos de ingesta de búsqueda
+        # (normalizeSearchResults y searchMergeEngine) para no volver a
+        # consultar las APIs de las BBDD ni regenerar los *_search.json.
+        # Se asume que los índices ya existen de una ejecución previa.
+        # Solo se incorporan los PDFs manuales nuevos (pasos 5 y 6)
+        # y se continúa el pipeline desde el ranking en adelante.
+        if server_gpu == "serverFull":
+            writeLog("info", logger,
+                     "⏭️ [serverGPU:serverFull] Saltando normalizeSearchResults (paso 1): "
+                     "no se regeneran *_search.json ni se consultan APIs de BBDD. "
+                     "Se usarán los índices existentes (canonical.json, *_search.json).")
+        else:
+            from sources.normalizeSearchResults import processNormalizeSearchResults
+            processNormalizeSearchResults()
 
         from sources.searchMergeEngine import processSearchMergeEngine
         processSearchMergeEngine()

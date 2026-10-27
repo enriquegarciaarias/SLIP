@@ -1055,3 +1055,31 @@ Implementación:
 **Estado del pipeline:** pasos 1-6 de SensoresACL siguen completados hasta `completeSelection`;
 los pasos 7-21 siguen pendientes. El nuevo modo `serverFull` permite ejecutarlos todos en el
 servidor, incluida la reconstrucción desde la ingesta.
+
+---
+
+### Sesión cerrada — 2026-10-27 (actualización serverFull)
+
+**Qué se hizo:**
+1. **Modificación de `serverFull` para saltar `normalizeSearchResults` (paso 1):**
+   - En modo `--serverGPU serverFull`, el paso `normalizeSearchResults` se salta intencionadamente
+     para no volver a consultar las APIs de las BBDD (IEEE, PubMed, etc.) ni regenerar los
+     archivos `*_search.json`.
+   - Se asume que los índices ya existen de una ejecución previa (`canonical.json`,
+     `*_search.json`, `ranked_papers.json`).
+   - Solo se incorporan los PDFs manuales nuevos (pasos 5 y 6: `manualPapersScanner` +
+     `manualIngestion`) y se continúa el pipeline desde el ranking en adelante.
+   - Esto evita reconstruir índices innecesariamente cuando lo único que varía son los PDFs
+     manuales.
+2. **Cambio en `main.py`:** bloque condicional que salta `processNormalizeSearchResults()`
+   solo cuando `server_gpu == "serverFull"`, manteniendo `processSearchMergeEngine()` para que
+   use los índices existentes.
+3. **Documentación actualizada:** `AGENTS.md` sección `serverFull` documenta el salto del paso 1.
+
+**Cambios en estructura de directorios, módulos, configuración o flujos:**
+- **Archivos modificados:** `main.py`, `AGENTS.md`, `SESSION_STATE.md`.
+- **Sin cambios** en la estructura de directorios ni en el orden de pasos del pipeline (salvo el
+  salto condicional del paso 1 en `serverFull`).
+
+**Estado del pipeline:** pasos 1-6 de SensoresACL siguen completados hasta `completeSelection`;
+los pasos 7-21 siguen pendientes.
